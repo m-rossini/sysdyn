@@ -223,7 +223,7 @@ export function renderWorkspace(
 
   <div class="panel chart-full">
       <div class="panel-head">
-        <div><h3>Time series ${qIcon('Tick the series below the chart to show or hide them (up to 12). The red dashed cursor follows the current scrubber time.')}</h3></div>
+        <div><h3>Time series ${qIcon('Tick the series below the chart to show or hide them (up to 12). Line style encodes kind: solid = stock, long-dash = flow, dotted = auxiliary, fine-dot = parameter. The red dashed cursor follows the current scrubber time.')}</h3></div>
       </div>
       <div class="chart-wrap"><canvas id="chart"></canvas></div>
       <div class="vars vars-inline" id="vars"></div>
@@ -624,14 +624,30 @@ export function renderWorkspace(
     const show = Array.from(selectedVars)
       .filter(variable => result.variables.includes(variable))
       .slice(0, 12);
+    const modelDef = result.config.model;
+    const kindOf = (name: string): string => {
+      if ((modelDef.stocks ?? []).some(item => item.name === name)) return 'stock';
+      if ((modelDef.flows ?? []).some(item => item.name === name)) return 'flow';
+      if ((modelDef.auxiliaries ?? []).some(item => item.name === name)) return 'auxiliary';
+      return 'parameter';
+    };
+    // Line style encodes the variable kind so same-colour series stay
+    // distinguishable: stocks solid, flows long-dash, auxiliaries dotted,
+    // parameters fine-dot (constants read as flat reference lines).
+    const styleOf = (kind: string): { borderDash: number[]; borderWidth: number } => {
+      if (kind === 'flow') return { borderDash: [7, 4], borderWidth: 2 };
+      if (kind === 'auxiliary') return { borderDash: [2, 3], borderWidth: 2 };
+      if (kind === 'parameter') return { borderDash: [1, 3], borderWidth: 1.5 };
+      return { borderDash: [], borderWidth: 2.5 };
+    };
     const datasets = show.map((variable, index) => ({
-      label: variable,
+      label: `${variable} (${kindOf(variable)})`,
       data: result.series.map(point => point.values[variable] ?? 0),
       borderColor: CHART_COLORS[index % CHART_COLORS.length],
       backgroundColor: 'transparent',
       tension: 0.15,
       pointRadius: 0,
-      borderWidth: 2,
+      ...styleOf(kindOf(variable)),
     }));
     chart = new Chart(chartCanvas, {
       type: 'line',
@@ -642,7 +658,7 @@ export function renderWorkspace(
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { labels: { boxWidth: 12, usePointStyle: true } },
+          legend: { labels: { boxWidth: 24, usePointStyle: false } },
           tooltip: { intersect: false },
         },
         scales: {
