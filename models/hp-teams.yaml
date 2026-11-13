@@ -1,0 +1,133 @@
+version: "1"
+model:
+  id: hp-teams
+  title: High-Performance Team (v0)
+  description: >-
+    Simple model of throughput, capability and energy. A starting point to iterate on.
+    Throughput converts backlog into delivered work. Delivered work grows capability
+    (reinforcing loop) while also consuming energy (balancing loop).
+  time:
+    start: 0
+    stop: 52
+    dt: 0.5
+    unit: week
+  parameters:
+    - name: base_capacity
+      value: 30
+      unit: work/week
+      description: >-
+        Throughput ceiling at full capability and full energy. Set high enough that
+        initial throughput (about 4.8 work/week) exceeds the incoming rate, so the
+        backlog drains instead of growing without bound.
+      concept: parameter
+    - name: incoming_rate
+      value: 4
+      unit: work/week
+      description: New work arriving per week.
+      concept: parameter
+    - name: learning_rate
+      value: 0.08
+      unit: 1/week
+      description: Fraction of throughput converted into capability gains.
+      concept: parameter
+    - name: burnout_rate
+      value: 0.2
+      unit: points/work
+      description: >-
+        Energy consumed per unit of throughput. Chosen together with recovery_rate so
+        energy settles near 75-85 rather than collapsing or saturating at 100.
+      concept: parameter
+    - name: recovery_rate
+      value: 0.05
+      unit: 1/week
+      description: Rate at which the energy gap (100 - energy) is restored.
+      concept: parameter
+  stocks:
+    - name: backlog
+      initial: 80
+      unit: work
+      inflows: [new_work]
+      outflows: [throughput]
+      description: Work waiting to be delivered.
+      concept: stock
+    - name: delivered
+      initial: 0
+      unit: work
+      inflows: [throughput]
+      description: Cumulative work delivered.
+      concept: stock
+    - name: capability
+      initial: 40
+      unit: points
+      inflows: [learning]
+      description: Team skill and knowledge, on a 0-100 scale.
+      concept: stock
+    - name: energy
+      initial: 60
+      unit: points
+      inflows: [recovery]
+      outflows: [burnout]
+      description: Team energy and morale, on a 0-100 scale.
+      concept: stock
+  auxiliaries:
+    - name: capacity
+      equation: "base_capacity * capability / 100"
+      unit: work/week
+      description: Throughput ceiling implied by current capability.
+      concept: auxiliary
+    - name: energy_factor
+      equation: "energy / 100"
+      unit: "1"
+      description: Share of capacity available at the current energy level.
+      concept: auxiliary
+    - name: focus
+      equation: "backlog / (backlog + 40)"
+      unit: "1"
+      description: >-
+        Share of nominal capacity that has work to act on. It approaches 1 for a large
+        backlog and goes to 0 when the backlog empties. The original draft used
+        1 / (1 + backlog / 100), which made throughput shrink as the backlog grew and
+        drove backlog to zero (and negative under Euler); this saturating form keeps
+        the drainage smooth and bounded.
+      concept: auxiliary
+    - name: effective_throughput
+      equation: "capacity * energy_factor * focus"
+      unit: work/week
+      description: Actual delivery rate after energy and work-availability limits.
+      concept: auxiliary
+  flows:
+    # Reinforcing loop: more throughput -> more learning -> more capability ->
+    # more capacity -> more effective throughput.
+    - name: throughput
+      equation: "effective_throughput"
+      from: backlog
+      to: delivered
+      unit: work/week
+      description: Work completed and moved from backlog to delivered.
+      concept: flow
+    - name: learning
+      equation: "learning_rate * throughput * (1 - capability / 100)"
+      to: capability
+      unit: points/week
+      description: Capability gained from doing work, saturating at 100.
+      concept: flow
+    # Balancing loop: more throughput -> more burnout -> less energy -> lower
+    # energy factor -> less effective throughput.
+    - name: burnout
+      equation: "burnout_rate * throughput"
+      from: energy
+      unit: points/week
+      description: Energy spent sustaining the delivery rate.
+      concept: flow
+    - name: recovery
+      equation: "recovery_rate * (100 - energy)"
+      to: energy
+      unit: points/week
+      description: Energy restored when below the 100-point ceiling.
+      concept: flow
+    - name: new_work
+      equation: "incoming_rate"
+      to: backlog
+      unit: work/week
+      description: New work arriving into the backlog.
+      concept: flow
