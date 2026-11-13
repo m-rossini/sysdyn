@@ -1,0 +1,37 @@
+version: "1"
+model:
+  id: inventory
+  title: Inventory with Reorder Pulse
+  description: Stock-and-flow model of inventory with a periodic replenishment pulse and a step increase in demand.
+  time:
+    start: 0
+    stop: 40
+    dt: 0.5
+  parameters:
+    - name: base_demand
+      value: 4
+      unit: units/week
+      concept: parameter
+  stocks:
+    - name: inventory
+      initial: 30
+      unit: units
+      inflows: [replenishment]
+      outflows: [sales]
+      concept: stock
+  flows:
+    - name: sales
+      equation: "base_demand + step(2, 10)"
+      from: inventory
+      unit: units/week
+      concept: flow
+    - name: replenishment
+      equation: "pulse(40, 5, 10)"
+      to: inventory
+      unit: units/week
+      concept: flow
+  auxiliaries:
+    - name: weeks
+      equation: "t"
+      unit: week
+      concept: auxiliary
