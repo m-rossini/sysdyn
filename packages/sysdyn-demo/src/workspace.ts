@@ -215,18 +215,18 @@ export function renderWorkspace(
         <div class="chart-wrap"><canvas id="chart"></canvas></div>
         <div class="vars vars-inline" id="vars"></div>
       </div>
-    </div>
 
-    <aside class="dash-side">
-      <div class="panel">
-        <div class="panel-head"><h3>Elements ${qIcon('Every parameter, stock, flow, and auxiliary in the model. Click one for details.')}</h3></div>
-        <div class="elements" id="elements"></div>
+      <div class="dash-duo">
+        <div class="panel">
+          <div class="panel-head"><h3>Elements ${qIcon('Every parameter, stock, flow, and auxiliary in the model. Click one for details.')}</h3></div>
+          <div class="elements" id="elements"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Selected / concept ${qIcon('Integrated references for system dynamics concepts and the selected model element.')}</h3></div>
+          <div class="detail help" id="detail"></div>
+        </div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><h3>Selected / concept ${qIcon('Integrated references for system dynamics concepts and the selected model element.')}</h3></div>
-        <div class="detail help" id="detail"></div>
-      </div>
-    </aside>
+    </div>
   </div>
 </section>
 

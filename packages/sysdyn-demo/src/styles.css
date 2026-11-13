@@ -477,12 +477,18 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .notice-text div { margin-top: 3px; font-size: 12.5px; word-break: break-word; }
 
 .dash-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.dash-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.dash-duo {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 370px;
+  grid-template-columns: 1fr 1fr;
   gap: 14px;
   align-items: start;
 }
-.dash-main, .dash-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
 .playback-panel { padding: 12px 14px; }
 .playback { display: flex; flex-direction: column; gap: 10px; }
@@ -703,12 +709,10 @@ input[type='checkbox'] { accent-color: var(--accent); }
 /* ---------- responsive ---------- */
 
 @media (max-width: 1240px) {
-  .dash-grid { grid-template-columns: minmax(0, 1fr) 330px; }
 }
 
 @media (max-width: 1100px) {
-  .dash-grid { grid-template-columns: 1fr; }
-  .dash-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .dash-duo { grid-template-columns: 1fr; }
   .edit-grid { grid-template-columns: 1fr; }
 }
 
@@ -725,7 +729,6 @@ input[type='checkbox'] { accent-color: var(--accent); }
   .tab-hint { margin-left: 0; width: 100%; }
   .card-grid { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-  .dash-side { grid-template-columns: 1fr; }
   #diagram { max-height: 480px; }
   .chart-wrap { height: 280px; }
   .yaml-input { height: 340px; }
