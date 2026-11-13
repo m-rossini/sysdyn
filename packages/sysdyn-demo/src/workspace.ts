@@ -197,7 +197,7 @@ export function renderWorkspace(
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel diagram-panel">
         <div class="panel-head">
           <h3>Stock &amp; flow diagram ${qIcon('Stocks are tanks whose fill tracks the current value; flows are valves whose outline thickness tracks magnitude. Blue arrows are material flows, dashed grey arrows are information links (equations that read another variable). Click a node to inspect it and highlight its links.')}</h3>
           <span class="legend" aria-label="Diagram legend">
@@ -207,26 +207,26 @@ export function renderWorkspace(
         </div>
         <div class="diagram-wrap"><svg id="diagram" role="img" aria-label="Stock and flow diagram"></svg></div>
       </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h3>Time series ${qIcon('Tick the series below the chart to show or hide them (up to 12). The red dashed cursor follows the current scrubber time.')}</h3>
-        </div>
-        <div class="chart-wrap"><canvas id="chart"></canvas></div>
-        <div class="vars vars-inline" id="vars"></div>
-      </div>
     </div>
 
     <aside class="dash-side">
-      <div class="panel">
+      <div class="panel elements-panel">
         <div class="panel-head"><h3>Elements ${qIcon('Every parameter, stock, flow, and auxiliary in the model. Click one for details.')}</h3></div>
         <div class="elements" id="elements"></div>
       </div>
-      <div class="panel">
+      <div class="panel detail-panel">
         <div class="panel-head"><h3>Selected / concept ${qIcon('Integrated references for system dynamics concepts and the selected model element.')}</h3></div>
         <div class="detail help" id="detail"></div>
       </div>
     </aside>
+  </div>
+
+  <div class="panel chart-full">
+      <div class="panel-head">
+        <div><h3>Time series ${qIcon('Tick the series below the chart to show or hide them (up to 12). The red dashed cursor follows the current scrubber time.')}</h3></div>
+      </div>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+      <div class="vars vars-inline" id="vars"></div>
   </div>
 </section>
 
