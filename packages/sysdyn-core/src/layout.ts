@@ -1,18 +1,18 @@
 import type { DiagramLayout, LayoutEdge, LayoutNode, ModelDef } from './types.js';
 import { extractDependencies } from './analysis.js';
 
-const STOCK_W = 140;
-const STOCK_H = 72;
-const FLOW_W = 116;
-const FLOW_H = 38;
-const NODE_W = 136;
-const NODE_H = 42;
-const CLOUD_W = 58;
-const CLOUD_H = 32;
-const STOCK_PITCH = 290;
-const ROW_PITCH = 56;
+const STOCK_W = 112;
+const STOCK_H = 56;
+const FLOW_W = 96;
+const FLOW_H = 30;
+const NODE_W = 108;
+const NODE_H = 30;
+const CLOUD_W = 44;
+const CLOUD_H = 24;
+const STOCK_PITCH = 240;
+const ROW_PITCH = 48;
 const MARGIN = 32;
-const COL_GAP = 24;
+const COL_GAP = 20;
 
 function spreadOffset(index: number, total: number): number {
   if (total <= 1) return 0;

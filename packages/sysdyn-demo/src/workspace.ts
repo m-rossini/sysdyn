@@ -210,7 +210,7 @@ export function renderWorkspace(
 
       <div class="panel">
         <div class="panel-head">
-          <h3>Time series ${qIcon('Graphs of the selected variables over simulated time. The red dashed cursor follows the current scrubber time.')}</h3>
+          <h3>Time series ${qIcon('Graphs of the selected variables over simulated time. Use the Variables panel to choose which series to show (up to 12). The red dashed cursor follows the current scrubber time.')}</h3>
         </div>
         <div class="chart-wrap"><canvas id="chart"></canvas></div>
       </div>
@@ -218,7 +218,7 @@ export function renderWorkspace(
 
     <aside class="dash-side">
       <div class="panel">
-        <div class="panel-head"><h3>Variables ${qIcon('Choose which variables to plot. Stocks and flows are selected by default.')}</h3></div>
+        <div class="panel-head"><h3>Variables ${qIcon('Choose which variables to plot. Dots match chart colors. Use All / Stocks / None for quick presets.')}</h3></div>
         <div class="vars" id="vars"></div>
       </div>
       <div class="panel">
@@ -532,28 +532,88 @@ export function renderWorkspace(
       varsEl.innerHTML = '<div class="muted">No plottable variables.</div>';
       return;
     }
-    varsEl.innerHTML = candidates.map(variable => {
-      const checked = selectedVars.has(variable);
-      return `<label><input type="checkbox" data-var="${escapeHtml(variable)}" ${checked ? 'checked' : ''}/> ${escapeHtml(variable)}</label>`;
-    }).join('');
-    varsEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(checkbox => {
+    const modelDef = result.config.model;
+    const groups: Array<{ title: string; names: string[] }> = [
+      { title: 'Stocks', names: (modelDef.stocks ?? []).map(item => item.name) },
+      { title: 'Flows', names: (modelDef.flows ?? []).map(item => item.name) },
+      { title: 'Auxiliaries', names: (modelDef.auxiliaries ?? []).map(item => item.name) },
+      { title: 'Parameters', names: (modelDef.parameters ?? []).map(item => item.name) },
+    ]
+      .map(group => ({ ...group, names: group.names.filter(name => candidates.includes(name)) }))
+      .filter(group => group.names.length > 0);
+    // Anything plottable but not in a group (should be rare) goes last.
+    const grouped = new Set(groups.flatMap(group => group.names));
+    const rest = candidates.filter(name => !grouped.has(name));
+    if (rest.length) groups.push({ title: 'Other', names: rest });
+
+    const scrollTop = varsEl.scrollTop;
+    varsEl.innerHTML = `
+      <div class="vars-head">
+        <span class="muted" id="varsCount"></span>
+        <span class="vars-actions">
+          <button type="button" class="link-btn" data-vars-action="all">All</button>
+          <button type="button" class="link-btn" data-vars-action="stocks">Stocks</button>
+          <button type="button" class="link-btn" data-vars-action="none">None</button>
+        </span>
+      </div>
+      ${groups.map(group => `
+        <div class="var-group">
+          <div class="var-group-title">${escapeHtml(group.title)}</div>
+          ${group.names.map(variable => `
+            <label class="var-row" data-var-row="${escapeHtml(variable)}">
+              <input type="checkbox" data-var="${escapeHtml(variable)}" ${selectedVars.has(variable) ? 'checked' : ''}/>
+              <span class="var-dot" data-var-dot="${escapeHtml(variable)}"></span>
+              <span class="var-name">${escapeHtml(variable)}</span>
+            </label>`).join('')}
+        </div>`).join('')}`;
+    varsEl.scrollTop = scrollTop;
+
+    varsEl.querySelectorAll<HTMLButtonElement>('[data-vars-action]').forEach(button => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.varsAction;
+        if (action === 'all') selectedVars = new Set(candidates);
+        else if (action === 'none') selectedVars = new Set();
+        else if (action === 'stocks') {
+          selectedVars = new Set((modelDef.stocks ?? []).map(item => item.name).filter(name => candidates.includes(name)));
+        } else return;
+        renderVarPicker();
+        rebuildChart();
+      });
+    });
+    varsEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-var]').forEach(checkbox => {
       checkbox.addEventListener('change', () => {
         const name = checkbox.dataset.var;
         if (!name) return;
         if (checkbox.checked) selectedVars.add(name);
         else selectedVars.delete(name);
+        refreshVarPickerState();
         rebuildChart();
       });
+    });
+    refreshVarPickerState();
+  }
+
+  function refreshVarPickerState(): void {
+    const result = sim;
+    if (!result) return;
+    const countEl = varsEl.querySelector('#varsCount');
+    if (countEl) countEl.textContent = `${selectedVars.size} of ${result.variables.filter(v => v !== 't' && v !== 'time').length} shown`;
+    const show = Array.from(selectedVars).filter(variable => result.variables.includes(variable));
+    varsEl.querySelectorAll<HTMLElement>('[data-var-dot]').forEach(dot => {
+      const name = dot.dataset.varDot ?? '';
+      const index = show.indexOf(name);
+      dot.style.background = index >= 0 ? CHART_COLORS[index % CHART_COLORS.length] : 'transparent';
+      dot.style.borderColor = index >= 0 ? CHART_COLORS[index % CHART_COLORS.length] : '#cbd5e1';
     });
   }
 
   function defaultSelection(result: SimulationResult): Set<string> {
-    const candidates = result.variables.filter(variable => variable !== 't' && variable !== 'time');
-    const preferred = candidates.filter(variable =>
-      (result.config.model.stocks ?? []).some(stock => stock.name === variable)
-      || (result.config.model.flows ?? []).some(flow => flow.name === variable),
-    );
-    return new Set((preferred.length ? preferred : candidates).slice(0, 5));
+    // Default to stocks only so the chart starts readable; users add the
+    // flows/auxiliaries they want via the Variables picker.
+    const stocks = (result.config.model.stocks ?? []).map(stock => stock.name)
+      .filter(name => result.variables.includes(name));
+    if (stocks.length) return new Set(stocks.slice(0, 4));
+    return new Set(result.variables.filter(variable => variable !== 't' && variable !== 'time').slice(0, 4));
   }
 
   function rebuildChart(): void {
@@ -566,7 +626,7 @@ export function renderWorkspace(
     const labels = result.series.map(point => point.t);
     const show = Array.from(selectedVars)
       .filter(variable => result.variables.includes(variable))
-      .slice(0, 8);
+      .slice(0, 12);
     const datasets = show.map((variable, index) => ({
       label: variable,
       data: result.series.map(point => point.values[variable] ?? 0),
@@ -830,6 +890,64 @@ export function renderWorkspace(
       return `M ${a.x} ${a.y} C ${a.x + k} ${a.y}, ${b.x - k} ${b.y}, ${b.x} ${b.y}`;
     };
 
+    // --- information-link anchors -----------------------------------------
+    // Information links leave a node on the side facing the target and are
+    // spread along that side, so multiple links never pile onto one point or
+    // cut diagonally through neighbouring boxes.
+    type Side = 'top' | 'bottom' | 'left' | 'right';
+    interface SideItem { key: string; node: LayoutNode; other: LayoutNode; side: Side }
+    const exitGroups = new Map<string, SideItem[]>();
+    const entryGroups = new Map<string, SideItem[]>();
+    const sideFor = (from: LayoutNode, to: LayoutNode): { exit: Side; entry: Side } => {
+      const dx = centerOf(to).x - centerOf(from).x;
+      const dy = centerOf(to).y - centerOf(from).y;
+      if (Math.abs(dx) > Math.abs(dy) * 1.6) {
+        return dx >= 0 ? { exit: 'right', entry: 'left' } : { exit: 'left', entry: 'right' };
+      }
+      return dy >= 0 ? { exit: 'bottom', entry: 'top' } : { exit: 'top', entry: 'bottom' };
+    };
+    const sideKey = (id: string, side: Side) => `${id}:${side}`;
+    const influenceEdges = currentLayout.edges.filter(edge => edge.type === 'influence');
+    for (const edge of influenceEdges) {
+      const fromNode = nodeById.get(edge.from);
+      const toNode = nodeById.get(edge.to);
+      if (!fromNode || !toNode) continue;
+      const { exit, entry } = sideFor(fromNode, toNode);
+      const key = `${edge.from}->${edge.to}`;
+      const exitItem: SideItem = { key, node: fromNode, other: toNode, side: exit };
+      const entryItem: SideItem = { key, node: toNode, other: fromNode, side: entry };
+      const exitList = exitGroups.get(sideKey(fromNode.id, exit));
+      if (exitList) exitList.push(exitItem); else exitGroups.set(sideKey(fromNode.id, exit), [exitItem]);
+      const entryList = entryGroups.get(sideKey(toNode.id, entry));
+      if (entryList) entryList.push(entryItem); else entryGroups.set(sideKey(toNode.id, entry), [entryItem]);
+    }
+
+    const pointOnSide = (node: LayoutNode, side: Side, index: number, total: number) => {
+      const fraction = (index + 1) / (total + 1);
+      if (side === 'top') return { x: node.x + node.width * fraction, y: node.y };
+      if (side === 'bottom') return { x: node.x + node.width * fraction, y: node.y + node.height };
+      if (side === 'left') return { x: node.x, y: node.y + node.height * fraction };
+      return { x: node.x + node.width, y: node.y + node.height * fraction };
+    };
+    const spreadAlong = (item: SideItem) =>
+      item.side === 'top' || item.side === 'bottom' ? centerOf(item.other).x : centerOf(item.other).y;
+
+    const influenceAnchors = new Map<string, { a: { x: number; y: number }; b: { x: number; y: number }; vertical: boolean }>();
+    const recordSpreads = (groups: Map<string, SideItem[]>, role: 'a' | 'b') => {
+      for (const items of groups.values()) {
+        const sorted = [...items].sort((left, right) => spreadAlong(left) - spreadAlong(right));
+        sorted.forEach((item, index) => {
+          const point = pointOnSide(item.node, item.side, index, sorted.length);
+          const current = influenceAnchors.get(item.key) ?? { a: point, b: point, vertical: true };
+          current[role] = point;
+          current.vertical = item.side === 'top' || item.side === 'bottom';
+          influenceAnchors.set(item.key, current);
+        });
+      }
+    };
+    recordSpreads(exitGroups, 'a');
+    recordSpreads(entryGroups, 'b');
+
     const ordered = [...currentLayout.edges].sort((left, right) =>
       left.type === right.type ? 0 : left.type === 'influence' ? -1 : 1,
     );
@@ -837,10 +955,23 @@ export function renderWorkspace(
       const fromNode = nodeById.get(edge.from);
       const toNode = nodeById.get(edge.to);
       if (!fromNode || !toNode) continue;
-      const a = borderPoint(fromNode, centerOf(toNode));
-      const b = borderPoint(toNode, centerOf(fromNode));
+      const influence = influenceAnchors.get(`${edge.from}->${edge.to}`);
+      const a = influence?.a ?? borderPoint(fromNode, centerOf(toNode));
+      const b = influence?.b ?? borderPoint(toNode, centerOf(fromNode));
       const path = svgNode('path');
-      path.setAttribute('d', curveFor(a, b));
+      if (influence) {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const k = influence.vertical
+          ? Math.max(16, Math.abs(dy) * 0.5)
+          : Math.max(16, Math.abs(dx) * 0.5);
+        const d = influence.vertical
+          ? `M ${a.x} ${a.y} C ${a.x} ${a.y + Math.sign(dy) * k}, ${b.x} ${b.y - Math.sign(dy) * k}, ${b.x} ${b.y}`
+          : `M ${a.x} ${a.y} C ${a.x + Math.sign(dx) * k} ${a.y}, ${b.x - Math.sign(dx) * k} ${b.y}, ${b.x} ${b.y}`;
+        path.setAttribute('d', d);
+      } else {
+        path.setAttribute('d', curveFor(a, b));
+      }
       path.setAttribute('fill', 'none');
       path.setAttribute('stroke-linecap', 'round');
 
@@ -996,19 +1127,25 @@ export function renderWorkspace(
 
       const label = svgNode('text');
       label.setAttribute('x', String(node.x + node.width / 2));
-      label.setAttribute('y', String(node.y + node.height / 2 - 5));
+      label.setAttribute('y', String(node.y + node.height / 2 - 2));
       label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('font-size', '12');
+      const isLong = node.id.length > 14;
+      label.setAttribute('font-size', isLong ? '10' : '11');
       label.setAttribute('font-weight', selected === node.id ? '700' : '600');
       label.setAttribute('fill', '#0f172a');
       label.textContent = node.id;
+      // Keep long names inside their box so they don't collide with arrows.
+      if (node.id.length * 6.1 > node.width - 10) {
+        label.setAttribute('textLength', String(node.width - 10));
+        label.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+      }
       group.appendChild(label);
 
       const valueLabel = svgNode('text');
       valueLabel.setAttribute('x', String(node.x + node.width / 2));
-      valueLabel.setAttribute('y', String(node.y + node.height / 2 + 12));
+      valueLabel.setAttribute('y', String(node.y + node.height / 2 + 11));
       valueLabel.setAttribute('text-anchor', 'middle');
-      valueLabel.setAttribute('font-size', '11');
+      valueLabel.setAttribute('font-size', '10');
       valueLabel.setAttribute('fill', '#111827');
       valueLabel.textContent = value !== undefined ? formatNumber(Number(value)) : '';
       group.appendChild(valueLabel);
