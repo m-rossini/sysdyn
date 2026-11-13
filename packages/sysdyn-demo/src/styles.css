@@ -518,18 +518,28 @@ input[type='checkbox'] { accent-color: var(--accent); }
   padding: 8px 10px;
   background: #fff;
 }
-.vars-head {
+.vars-inline {
+  max-height: none;
+  border: none;
+  background: transparent;
+  padding: 10px 2px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 4px 14px;
+}
+.vars-inline .vars-head {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  position: sticky;
-  top: 0;
-  background: #fff;
-  padding: 2px 0 6px;
+  position: static;
+  background: transparent;
   border-bottom: 1px dashed #e2e8f0;
-  margin-bottom: 6px;
+  padding: 0 0 6px;
+  margin-bottom: 2px;
 }
+.vars-inline .var-group { margin-bottom: 2px; }
 .vars-actions { display: inline-flex; gap: 4px; }
 .link-btn {
   border: 1px solid #e0e7ff;

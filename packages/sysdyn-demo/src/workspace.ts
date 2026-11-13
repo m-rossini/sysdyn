@@ -210,17 +210,14 @@ export function renderWorkspace(
 
       <div class="panel">
         <div class="panel-head">
-          <h3>Time series ${qIcon('Graphs of the selected variables over simulated time. Use the Variables panel to choose which series to show (up to 12). The red dashed cursor follows the current scrubber time.')}</h3>
+          <h3>Time series ${qIcon('Tick the series below the chart to show or hide them (up to 12). The red dashed cursor follows the current scrubber time.')}</h3>
         </div>
         <div class="chart-wrap"><canvas id="chart"></canvas></div>
+        <div class="vars vars-inline" id="vars"></div>
       </div>
     </div>
 
     <aside class="dash-side">
-      <div class="panel">
-        <div class="panel-head"><h3>Variables ${qIcon('Choose which variables to plot. Dots match chart colors. Use All / Stocks / None for quick presets.')}</h3></div>
-        <div class="vars" id="vars"></div>
-      </div>
       <div class="panel">
         <div class="panel-head"><h3>Elements ${qIcon('Every parameter, stock, flow, and auxiliary in the model. Click one for details.')}</h3></div>
         <div class="elements" id="elements"></div>
