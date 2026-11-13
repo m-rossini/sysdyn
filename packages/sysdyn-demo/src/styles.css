@@ -509,6 +509,8 @@ input[type='checkbox'] { accent-color: var(--accent); }
   overflow: auto;
 }
 #diagram { display: block; width: 100%; height: auto; min-width: 640px; max-height: 620px; }
+#diagram g[data-node-id] { touch-action: none; }
+#diagram g[data-node-id]:active { cursor: grabbing; }
 
 .legend { display: inline-flex; align-items: center; gap: 14px; font-size: 12px; color: #475569; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }

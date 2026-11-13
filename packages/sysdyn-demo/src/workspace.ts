@@ -199,11 +199,12 @@ export function renderWorkspace(
 
       <div class="panel diagram-panel">
         <div class="panel-head">
-          <h3>Stock &amp; flow diagram ${qIcon('Stocks are tanks whose fill tracks the current value; flows are valves whose outline thickness tracks magnitude. Blue arrows are material flows, dashed grey arrows are information links (equations that read another variable). Click a node to inspect it and highlight its links.')}</h3>
+          <h3>Stock &amp; flow diagram ${qIcon('Stocks are tanks whose fill tracks the current value; flows are valves whose outline thickness tracks magnitude. Blue arrows are material flows, dashed grey arrows are information links (equations that read another variable). Click a node to inspect it and highlight its links. Drag any node to rearrange; Reset layout restores auto-layout.')}</h3>
           <span class="legend" aria-label="Diagram legend">
             <span class="legend-item"><span class="legend-swatch legend-flow"></span>flow</span>
             <span class="legend-item"><span class="legend-swatch legend-info"></span>information</span>
           </span>
+          <button type="button" class="btn btn-sm" id="resetLayoutBtn" title="Clear manual node positions and restore auto-layout">Reset layout</button>
         </div>
         <div class="diagram-wrap"><svg id="diagram" role="img" aria-label="Stock and flow diagram"></svg></div>
       </div>
@@ -336,6 +337,7 @@ export function renderWorkspace(
   const timeLabel = pick<HTMLElement>('#timeLabel');
   const timeMeta = pick<HTMLElement>('#timeMeta');
   const diagramSvg = pick<SVGSVGElement>('#diagram');
+  const resetLayoutBtn = pick<HTMLButtonElement>('#resetLayoutBtn');
   const chartCanvas = pick<HTMLCanvasElement>('#chart');
   const varsEl = pick<HTMLElement>('#vars');
   const elementsEl = pick<HTMLElement>('#elements');
@@ -368,6 +370,9 @@ export function renderWorkspace(
   let selectedVars = new Set<string>();
   let kpiRefs: Array<{ name: string; value: HTMLElement; delta: HTMLElement }> = [];
   let suppressCleanupSave = false;
+  // Manual node positions from drag-and-drop; overlay auto-layout output.
+  // Survives re-runs so simulation updates don't lose the user's arrangement.
+  const manualPos = new Map<string, { x: number; y: number }>();
 
   textarea.value = model.yaml;
 
@@ -844,6 +849,17 @@ export function renderWorkspace(
     return metrics?.flowMax.get(name) ?? 1;
   }
 
+  function toSvgCoords(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = diagramSvg.getBoundingClientRect();
+    const w = layout?.width ?? rect.width;
+    const h = layout?.height ?? rect.height;
+    if (!rect.width || !rect.height) return { x: 0, y: 0 };
+    return {
+      x: (clientX - rect.left) * (w / rect.width),
+      y: (clientY - rect.top) * (h / rect.height),
+    };
+  }
+
   function renderDiagram(): void {
     const result = sim;
     const currentLayout = layout;
@@ -873,7 +889,11 @@ export function renderWorkspace(
     makeMarker('arrow-influence', '#94a3b8', 8);
     diagramSvg.appendChild(defs);
 
-    const nodeById = new Map(currentLayout.nodes.map(node => [node.id, node]));
+    const placed: LayoutNode[] = currentLayout.nodes.map(node => {
+      const manual = manualPos.get(node.id);
+      return manual ? { ...node, x: manual.x, y: manual.y } : node;
+    });
+    const nodeById = new Map(placed.map(node => [node.id, node]));
     const centerOf = (node: LayoutNode) => ({
       x: node.x + node.width / 2,
       y: node.y + node.height / 2,
@@ -1022,16 +1042,43 @@ export function renderWorkspace(
       diagramSvg.appendChild(path);
     }
 
-    for (const node of currentLayout.nodes) {
+    for (const node of placed) {
       const group = svgNode('g');
       group.dataset.nodeId = node.id;
       group.dataset.nodeType = node.type;
       const isCloud = node.type === 'cloud';
       const value = result.series[idx]?.values[node.id];
-      if (!isCloud) {
-        group.style.cursor = 'pointer';
-        group.addEventListener('click', () => selectElement(node.id));
-      }
+      // Drag-and-drop: pointerdown starts a drag, window pointermove updates
+      // the manual position live (edges re-render from it), pointerup drops.
+      // A press without movement still selects (non-cloud nodes).
+      group.style.cursor = 'grab';
+      group.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        const startSvg = toSvgCoords(event.clientX, event.clientY);
+        const origin = { x: node.x, y: node.y };
+        let moved = false;
+        const onMove = (moveEvent: PointerEvent) => {
+          const current = toSvgCoords(moveEvent.clientX, moveEvent.clientY);
+          if (!moved && Math.hypot(current.x - startSvg.x, current.y - startSvg.y) < 3) return;
+          moved = true;
+          const maxX = Math.max(0, currentLayout.width - node.width);
+          const maxY = Math.max(0, currentLayout.height - node.height);
+          manualPos.set(node.id, {
+            x: Math.min(maxX, Math.max(0, origin.x + current.x - startSvg.x)),
+            y: Math.min(maxY, Math.max(0, origin.y + current.y - startSvg.y)),
+          });
+          renderDiagram();
+        };
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+          if (!isCloud) selectElement(node.id);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+      });
 
       if (isCloud) {
         const ellipse = svgNode('ellipse');
@@ -1617,6 +1664,11 @@ export function renderWorkspace(
     if (!sim) return;
     idx = Math.min(sim.series.length - 1, idx + 1);
     updateFrame();
+  });
+  resetLayoutBtn.addEventListener('click', () => {
+    manualPos.clear();
+    renderDiagram();
+    toast('Diagram layout reset to auto-layout.');
   });
   speedSelect.addEventListener('change', () => {
     speed = Number(speedSelect.value) || 1;
