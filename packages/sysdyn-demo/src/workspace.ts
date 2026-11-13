@@ -10,6 +10,7 @@ import {
   validateConfig,
   type ConceptDef,
   type DiagramLayout,
+  type LayoutNode,
   type SimulationResult,
   type SysDynConfig,
 } from '@sysdyn/core';
@@ -198,7 +199,11 @@ export function renderWorkspace(
 
       <div class="panel">
         <div class="panel-head">
-          <h3>Stock &amp; flow diagram ${qIcon('Auto-laid-out view: stocks are tanks whose fill tracks the current value, flows are valves whose line thickness tracks magnitude. Click a node to inspect it.')}</h3>
+          <h3>Stock &amp; flow diagram ${qIcon('Stocks are tanks whose fill tracks the current value; flows are valves whose outline thickness tracks magnitude. Blue arrows are material flows, dashed grey arrows are information links (equations that read another variable). Click a node to inspect it and highlight its links.')}</h3>
+          <span class="legend" aria-label="Diagram legend">
+            <span class="legend-item"><span class="legend-swatch legend-flow"></span>flow</span>
+            <span class="legend-item"><span class="legend-swatch legend-info"></span>information</span>
+          </span>
         </div>
         <div class="diagram-wrap"><svg id="diagram" role="img" aria-label="Stock and flow diagram"></svg></div>
       </div>
@@ -717,6 +722,27 @@ export function renderWorkspace(
         <div><strong>Value:</strong> ${escapeHtml(String(parameter.value))} ${escapeHtml(parameter.unit ?? '')}</div>`;
     }
 
+    // Explicit causal neighbourhood: what this element reads and what reads it.
+    const reads = flow
+      ? equationVariables(flow.equation)
+      : auxiliary
+        ? equationVariables(auxiliary.equation)
+        : [];
+    const readers = [...(modelDef.auxiliaries ?? []), ...(modelDef.flows ?? [])]
+      .filter(def => def.name !== name && equationVariables(def.equation).includes(name))
+      .map(def => def.name);
+    const linkList = (items: string[]) => (items.length
+      ? `<span class="link-list">${items
+        .map(item => `<button type="button" class="link-chip" data-link="${escapeHtml(item)}">${escapeHtml(item)}</button>`)
+        .join('')}</span>`
+      : '<span class="muted">none</span>');
+    const connections = `
+      <div class="connections">
+        <div><strong>Information links</strong> ${qIcon('Dashed arrows in the diagram. “Reads from” are the variables in this equation; “Read by” are the equations that use this element.')}</div>
+        <div><strong>Reads from:</strong> ${linkList(reads)}</div>
+        <div><strong>Read by:</strong> ${linkList(readers)}</div>
+      </div>`;
+
     const references = concept?.references?.length
       ? `<ul>${concept.references.map(reference => `<li>${escapeHtml(reference)}</li>`).join('')}</ul>`
       : '<div class="muted">No references listed.</div>';
@@ -726,6 +752,7 @@ export function renderWorkspace(
     detailEl.innerHTML = `
       <div><strong>${escapeHtml(name)}</strong> <span class="badge">${kind}</span> ${qIcon('Click diagram nodes or list items to inspect behavior, equations, and connections.')}</div>
       ${specific}
+      ${connections}
       ${concept ? `<hr/><div><strong>Concept reference: ${escapeHtml(concept.name)}</strong> ${qIcon(concept.summary)}</div><div>${escapeHtml(concept.summary)}</div>${concept.whenToUse ? `<div><strong>When to use:</strong> ${escapeHtml(concept.whenToUse)}</div>` : ''}${examples}${concept.mathNotes ? `<div><strong>Math notes:</strong> ${escapeHtml(concept.mathNotes)}</div>` : ''}<div><strong>References:</strong></div>${references}` : ''}`;
   }
 
@@ -752,54 +779,109 @@ export function renderWorkspace(
     while (diagramSvg.firstChild) diagramSvg.removeChild(diagramSvg.firstChild);
 
     const defs = svgNode('defs');
-    const marker = svgNode('marker');
-    marker.setAttribute('id', 'arrow-flow');
-    marker.setAttribute('markerWidth', '10');
-    marker.setAttribute('markerHeight', '10');
-    marker.setAttribute('refX', '8');
-    marker.setAttribute('refY', '3');
-    marker.setAttribute('orient', 'auto');
-    marker.setAttribute('markerUnits', 'strokeWidth');
-    const arrow = svgNode('path');
-    arrow.setAttribute('d', 'M0,0 L0,6 L9,3 z');
-    arrow.setAttribute('fill', '#2563eb');
-    marker.appendChild(arrow);
-    defs.appendChild(marker);
+    const makeMarker = (id: string, color: string, size: number) => {
+      const marker = svgNode('marker');
+      marker.setAttribute('id', id);
+      marker.setAttribute('markerWidth', String(size + 2));
+      marker.setAttribute('markerHeight', String(size));
+      marker.setAttribute('refX', String(size + 1));
+      marker.setAttribute('refY', String(size / 2));
+      marker.setAttribute('orient', 'auto');
+      // Fixed pixel size: the flow lines get thick, so stroke-relative
+      // markers would balloon into oversized wedges.
+      marker.setAttribute('markerUnits', 'userSpaceOnUse');
+      const arrow = svgNode('path');
+      arrow.setAttribute('d', `M0,0 L0,${size} L${size + 1},${size / 2} z`);
+      arrow.setAttribute('fill', color);
+      marker.appendChild(arrow);
+      defs.appendChild(marker);
+    };
+    makeMarker('arrow-flow', '#16a34a', 10);
+    makeMarker('arrow-influence', '#94a3b8', 8);
     diagramSvg.appendChild(defs);
 
-    for (const edge of currentLayout.edges) {
-      const from = currentLayout.nodes.find(node => node.id === edge.from);
-      const to = currentLayout.nodes.find(node => node.id === edge.to);
-      if (!from || !to) continue;
-      const x1 = from.x + from.width / 2;
-      const y1 = from.y + from.height / 2;
-      const x2 = to.x + to.width / 2;
-      const y2 = to.y + to.height / 2;
-      const midX = (x1 + x2) / 2;
+    const nodeById = new Map(currentLayout.nodes.map(node => [node.id, node]));
+    const centerOf = (node: LayoutNode) => ({
+      x: node.x + node.width / 2,
+      y: node.y + node.height / 2,
+    });
+    // Anchor an edge on the border of a node, pointing at (tx, ty).
+    const borderPoint = (node: LayoutNode, target: { x: number; y: number }) => {
+      const center = centerOf(node);
+      const dx = target.x - center.x;
+      const dy = target.y - center.y;
+      if (dx === 0 && dy === 0) return center;
+      const scaleX = dx === 0 ? Number.POSITIVE_INFINITY : node.width / 2 / Math.abs(dx);
+      const scaleY = dy === 0 ? Number.POSITIVE_INFINITY : node.height / 2 / Math.abs(dy);
+      const scale = Math.min(scaleX, scaleY);
+      return { x: center.x + dx * scale, y: center.y + dy * scale };
+    };
+    const curveFor = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      if (Math.abs(dx) < 1.5 || Math.abs(dy) < 1.5) {
+        return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+      }
+      if (Math.abs(dy) >= Math.abs(dx)) {
+        const k = dy * 0.45;
+        return `M ${a.x} ${a.y} C ${a.x} ${a.y + k}, ${b.x} ${b.y - k}, ${b.x} ${b.y}`;
+      }
+      const k = dx * 0.45;
+      return `M ${a.x} ${a.y} C ${a.x + k} ${a.y}, ${b.x - k} ${b.y}, ${b.x} ${b.y}`;
+    };
+
+    const ordered = [...currentLayout.edges].sort((left, right) =>
+      left.type === right.type ? 0 : left.type === 'influence' ? -1 : 1,
+    );
+    for (const edge of ordered) {
+      const fromNode = nodeById.get(edge.from);
+      const toNode = nodeById.get(edge.to);
+      if (!fromNode || !toNode) continue;
+      const a = borderPoint(fromNode, centerOf(toNode));
+      const b = borderPoint(toNode, centerOf(fromNode));
       const path = svgNode('path');
-      const d = Math.abs(y1 - y2) > 30
-        ? `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
-        : `M ${x1} ${y1} L ${x2} ${y2}`;
-      path.setAttribute('d', d);
+      path.setAttribute('d', curveFor(a, b));
       path.setAttribute('fill', 'none');
-      const stroke = edge.type === 'flow' ? '#2563eb' : '#94a3b8';
-      let width = edge.type === 'flow' ? 2.5 : 1.5;
-      if (edge.type === 'flow') {
-        const flowNode = [from, to].find(node => node.type === 'flow');
+      path.setAttribute('stroke-linecap', 'round');
+
+      const isFlow = edge.type === 'flow';
+      const touchesSelection = !selected || edge.from === selected || edge.to === selected;
+      let strokeWidth = isFlow ? 2 : 1.6;
+      let opacity = isFlow ? 1 : 0.85;
+      let stroke = isFlow ? '#16a34a' : '#71809a';
+
+      if (isFlow) {
+        const flowNode = fromNode.type === 'flow' ? fromNode : toNode.type === 'flow' ? toNode : null;
         if (flowNode) {
           const current = Math.abs(Number(result.series[idx]?.values[flowNode.id] ?? 0));
-          width = 1.5 + 8 * Math.min(1, current / flowMax(flowNode.id));
+          strokeWidth = 1.5 + 4.5 * Math.min(1, current / flowMax(flowNode.id));
         }
-        path.setAttribute('marker-end', 'url(#arrow-flow)');
+      } else if (selected && touchesSelection) {
+        stroke = '#6366f1';
       }
+      if (!touchesSelection) {
+        opacity *= 0.22;
+        strokeWidth = Math.min(strokeWidth, 1.4);
+      } else if (selected) {
+        strokeWidth += 0.8;
+      }
+
       path.setAttribute('stroke', stroke);
-      path.setAttribute('stroke-width', String(width));
-      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-width', String(strokeWidth));
+      path.setAttribute('opacity', String(opacity));
+      if (!isFlow) path.setAttribute('stroke-dasharray', '4 4');
+      path.setAttribute('marker-end', isFlow ? 'url(#arrow-flow)' : 'url(#arrow-influence)');
+
+      const edgeTitle = svgNode('title');
+      edgeTitle.textContent = `${edge.from} → ${edge.to} (${isFlow ? 'flow' : 'information link'})`;
+      path.appendChild(edgeTitle);
       diagramSvg.appendChild(path);
     }
 
     for (const node of currentLayout.nodes) {
       const group = svgNode('g');
+      group.dataset.nodeId = node.id;
+      group.dataset.nodeType = node.type;
       const isCloud = node.type === 'cloud';
       const value = result.series[idx]?.values[node.id];
       if (!isCloud) {
@@ -903,15 +985,6 @@ export function renderWorkspace(
         rect.setAttribute('stroke', selected === node.id ? '#dc2626' : '#334155');
         rect.setAttribute('stroke-width', selected === node.id ? '3' : '1.5');
         group.appendChild(rect);
-        if (node.type === 'flow') {
-          const vx = node.x + node.width / 2;
-          const vy = node.y + node.height / 2;
-          const triangle = svgNode('polygon');
-          triangle.setAttribute('points', `${vx - 8},${vy - 10} ${vx + 8},${vy - 10} ${vx},${vy + 2}`);
-          triangle.setAttribute('fill', '#16a34a');
-          triangle.setAttribute('opacity', '0.25');
-          group.appendChild(triangle);
-        }
       }
 
       const element = allElements().find(item => item.name === node.id);
@@ -923,7 +996,7 @@ export function renderWorkspace(
 
       const label = svgNode('text');
       label.setAttribute('x', String(node.x + node.width / 2));
-      label.setAttribute('y', String(node.y + node.height / 2 - 2));
+      label.setAttribute('y', String(node.y + node.height / 2 - 5));
       label.setAttribute('text-anchor', 'middle');
       label.setAttribute('font-size', '12');
       label.setAttribute('font-weight', selected === node.id ? '700' : '600');
@@ -933,7 +1006,7 @@ export function renderWorkspace(
 
       const valueLabel = svgNode('text');
       valueLabel.setAttribute('x', String(node.x + node.width / 2));
-      valueLabel.setAttribute('y', String(node.y + node.height / 2 + 14));
+      valueLabel.setAttribute('y', String(node.y + node.height / 2 + 12));
       valueLabel.setAttribute('text-anchor', 'middle');
       valueLabel.setAttribute('font-size', '11');
       valueLabel.setAttribute('fill', '#111827');
@@ -1406,6 +1479,13 @@ export function renderWorkspace(
   });
 
   textarea.addEventListener('input', markDirty);
+  detailEl.addEventListener('click', event => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const chip = target.closest<HTMLElement>('.link-chip');
+    const link = chip?.dataset.link;
+    if (link) selectElement(link);
+  });
   runBtn.addEventListener('click', () => parseAndRun(true));
   loadSampleBtn.addEventListener('click', loadSample);
   saveYamlBtn.addEventListener('click', exportYaml);

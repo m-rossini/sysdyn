@@ -22,7 +22,7 @@ The app is a small framework, not a single hardcoded demo:
 - `#/models` — **model library**: cards with metadata, search, new/import/duplicate/export/delete.
 - `#/models/<id>` — **workspace**: `Dashboard` (default) and `Edit` tabs.
 
-The dashboard provides stock KPI cards, a single Play/Pause toggle, Reset to `t = 0`, step controls, 0.5×–2× playback, a scrubber, the auto-laid-out stock-and-flow diagram (tank fill and flow thickness track the current values), and a time-series chart with a current-time cursor. The `?` icons expose concept help for stocks, flows, auxiliaries, parameters and equations.
+The dashboard provides stock KPI cards, a single Play/Pause toggle, Reset to `t = 0`, step controls, 0.5×–2× playback, a scrubber, the auto-laid-out stock-and-flow diagram (tank fill and flow thickness track the current values; dashed arrows are information links, and selecting an element highlights its links), and a time-series chart with a current-time cursor. The `?` icons expose concept help for stocks, flows, auxiliaries, parameters and equations.
 
 The edit tab holds the YAML source (canonical, autosaved after 600 ms), `Parse & Run`, the guided builder, YAML/JSON export and file import.
 

@@ -499,9 +499,14 @@ input[type='checkbox'] { accent-color: var(--accent); }
   border: 1px solid #e2e8f0;
   background: radial-gradient(circle at 20% 20%, #ffffff 0%, #f8fafc 60%, #f1f5f9 100%);
   border-radius: 16px;
-  overflow: hidden;
+  overflow: auto;
 }
-#diagram { display: block; width: 100%; height: 360px; }
+#diagram { display: block; width: 100%; height: auto; min-width: 640px; max-height: 620px; }
+
+.legend { display: inline-flex; align-items: center; gap: 14px; font-size: 12px; color: #475569; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch { display: inline-block; width: 26px; height: 0; border-top: 3px solid #16a34a; border-radius: 3px; }
+.legend-swatch.legend-info { border-top: 2px dashed #94a3b8; }
 
 .chart-wrap { height: 320px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 8px; }
 
@@ -541,6 +546,22 @@ input[type='checkbox'] { accent-color: var(--accent); }
 
 .detail { font-size: 13px; line-height: 1.5; max-height: 420px; overflow: auto; }
 .detail ul { margin: 6px 0 6px 18px; padding: 0; }
+
+.connections { margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: #f8faff; border: 1px solid #e0e7ff; }
+.connections > div + div { margin-top: 4px; }
+.link-list { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 4px; vertical-align: middle; }
+.link-chip {
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.link-chip:hover { background: #e0e7ff; border-color: #a5b4fc; }
+.link-chip:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
 .detail hr { border: none; border-top: 1px solid #e2e8f0; margin: 10px 0; }
 
 /* ---------- edit tab ---------- */
@@ -667,7 +688,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
   .card-grid { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .dash-side { grid-template-columns: 1fr; }
-  #diagram { height: 300px; }
+  #diagram { max-height: 480px; }
   .chart-wrap { height: 280px; }
   .yaml-input { height: 340px; }
   .card-foot { align-items: flex-start; }
