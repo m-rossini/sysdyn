@@ -1,0 +1,16 @@
+services:
+  demo:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: sysdyn:dev
+    container_name: sysdyn-demo
+    ports:
+      - "${PORT:-5173}:5173"
+    working_dir: /app/packages/sysdyn-demo
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    volumes:
+      - ${SYSDYN_ROOT:-.}:/app
+      - /app/node_modules
+      - /app/packages/sysdyn-core/node_modules
+      - /app/packages/sysdyn-demo/node_modules

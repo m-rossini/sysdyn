@@ -1,0 +1,27 @@
+version: "1"
+model:
+  id: inventory-example
+  title: Inventory with Reorder Pulse
+  time:
+    start: 0
+    stop: 40
+    dt: 0.5
+  parameters:
+    - name: base_demand
+      value: 4
+      unit: units/week
+  stocks:
+    - name: inventory
+      initial: 30
+      unit: units
+      inflows: [replenishment]
+      outflows: [sales]
+  flows:
+    - name: sales
+      equation: "base_demand + step(2, 10)"
+      from: inventory
+      unit: units/week
+    - name: replenishment
+      equation: "pulse(40, 5, 10)"
+      to: inventory
+      unit: units/week

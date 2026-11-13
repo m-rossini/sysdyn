@@ -1,0 +1,17 @@
+version: "1"
+model:
+  id: delay-smooth-demo
+  title: Delay and Smooth
+  time:
+    start: 0
+    stop: 30
+    dt: 0.5
+  auxiliaries:
+    - name: input_signal
+      equation: "step(10, 5)"
+    - name: smoothed
+      equation: "smooth(input_signal, 3, 0)"
+      concept: smooth
+    - name: delayed
+      equation: "delay(input_signal, 4, 0)"
+      concept: delay
