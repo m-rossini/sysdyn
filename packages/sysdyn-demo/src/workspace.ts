@@ -16,7 +16,10 @@ import {
 } from '@sysdyn/core';
 import {
   NEW_MODEL_YAML,
+  clearLayout,
   getBuiltinSeed,
+  loadLayout,
+  saveLayout,
   type ModelStore,
   type StoredModel,
 } from './store';
@@ -199,7 +202,7 @@ export function renderWorkspace(
 
       <div class="panel diagram-panel">
         <div class="panel-head">
-          <h3>Stock &amp; flow diagram ${qIcon('Stocks are tanks whose fill tracks the current value; flows are valves whose outline thickness tracks magnitude. Blue arrows are material flows, dashed grey arrows are information links (equations that read another variable). Click a node to inspect it and highlight its links. Drag any node to rearrange; Reset layout restores auto-layout.')}</h3>
+          <h3>Stock &amp; flow diagram ${qIcon('Stocks are tanks whose fill tracks the current value; flows are valves whose outline thickness tracks magnitude. Blue arrows are material flows, dashed grey arrows are information links (equations that read another variable). Click a node to inspect it and highlight its links. Drag any node to rearrange — the arrangement is saved automatically. Reset layout restores auto-layout.')}</h3>
           <span class="legend" aria-label="Diagram legend">
             <span class="legend-item"><span class="legend-swatch legend-flow"></span>flow</span>
             <span class="legend-item"><span class="legend-swatch legend-info"></span>information</span>
@@ -371,8 +374,9 @@ export function renderWorkspace(
   let kpiRefs: Array<{ name: string; value: HTMLElement; delta: HTMLElement }> = [];
   let suppressCleanupSave = false;
   // Manual node positions from drag-and-drop; overlay auto-layout output.
-  // Survives re-runs so simulation updates don't lose the user's arrangement.
+  // Survives re-runs and page reloads (persisted per model in localStorage).
   const manualPos = new Map<string, { x: number; y: number }>();
+  for (const [name, pos] of Object.entries(loadLayout(id))) manualPos.set(name, pos);
 
   textarea.value = model.yaml;
 
@@ -891,7 +895,13 @@ export function renderWorkspace(
 
     const placed: LayoutNode[] = currentLayout.nodes.map(node => {
       const manual = manualPos.get(node.id);
-      return manual ? { ...node, x: manual.x, y: manual.y } : node;
+      if (!manual) return node;
+      // Clamp stale saves (from model edits) back onto the canvas.
+      return {
+        ...node,
+        x: Math.min(Math.max(0, manual.x), Math.max(0, currentLayout.width - node.width)),
+        y: Math.min(Math.max(0, manual.y), Math.max(0, currentLayout.height - node.height)),
+      };
     });
     const nodeById = new Map(placed.map(node => [node.id, node]));
     const centerOf = (node: LayoutNode) => ({
@@ -1073,6 +1083,7 @@ export function renderWorkspace(
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
           window.removeEventListener('pointercancel', onUp);
+          if (moved) saveLayout(id, Object.fromEntries(manualPos));
           if (!isCloud) selectElement(node.id);
         };
         window.addEventListener('pointermove', onMove);
@@ -1557,6 +1568,8 @@ export function renderWorkspace(
       toast('Could not duplicate this model.', 'error');
       return;
     }
+    // Carry the arrangement over so the copy looks like its source.
+    if (manualPos.size) saveLayout(copy.id, Object.fromEntries(manualPos));
     toast(`Duplicated as “${copy.title}”.`, 'success');
     window.dispatchEvent(new Event('sysdyn:models-changed'));
     window.location.hash = `#/models/${encodeURIComponent(copy.id)}`;
@@ -1568,6 +1581,7 @@ export function renderWorkspace(
     if (!confirmed) return;
     suppressCleanupSave = true;
     store.remove(model.id);
+    clearLayout(model.id);
     toast(`Deleted “${model.title}”.`, 'info');
     window.dispatchEvent(new Event('sysdyn:models-changed'));
     window.location.hash = '#/models';
@@ -1667,6 +1681,7 @@ export function renderWorkspace(
   });
   resetLayoutBtn.addEventListener('click', () => {
     manualPos.clear();
+    clearLayout(id);
     renderDiagram();
     toast('Diagram layout reset to auto-layout.');
   });

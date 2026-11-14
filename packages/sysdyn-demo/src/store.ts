@@ -316,3 +316,87 @@ export class LocalModelStore implements ModelStore {
 export function modelToJSON(yaml: string): string {
   return toJSON(parseAny(yaml));
 }
+
+// --- per-model diagram layouts (drag-and-drop positions) -------------------
+// Stored separately from the model source under `sysdyn.layouts.v1`, keyed by
+// model id. Layouts are purely presentational: deleting a model drops its
+// entry, and stale node ids are ignored when the model changes.
+
+const LAYOUT_KEY = 'sysdyn.layouts.v1';
+
+export type SavedNodeLayout = Record<string, { x: number; y: number }>;
+
+function layoutStorage(): Storage | null {
+  try {
+    const storage = window.localStorage;
+    const probe = '__sysdyn_probe__';
+    storage.setItem(probe, '1');
+    storage.removeItem(probe);
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeLayout(value: unknown): SavedNodeLayout {
+  const out: SavedNodeLayout = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!key || !entry || typeof entry !== 'object') continue;
+    const { x, y } = entry as { x?: unknown; y?: unknown };
+    if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)) {
+      out[key] = { x, y };
+    }
+  }
+  return out;
+}
+
+function readAllLayouts(storage: Storage): Record<string, SavedNodeLayout> {
+  try {
+    const raw = storage.getItem(LAYOUT_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, SavedNodeLayout> = {};
+    for (const [modelId, layout] of Object.entries(parsed as Record<string, unknown>)) {
+      out[modelId] = sanitizeLayout(layout);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Saved drag-and-drop positions for a model, or `{}` when none exist. */
+export function loadLayout(modelId: string): SavedNodeLayout {
+  const storage = layoutStorage();
+  if (!storage) return {};
+  return readAllLayouts(storage)[modelId] ?? {};
+}
+
+/** Persist drag-and-drop positions for a model. */
+export function saveLayout(modelId: string, layout: SavedNodeLayout): void {
+  const storage = layoutStorage();
+  if (!storage) return;
+  try {
+    const all = readAllLayouts(storage);
+    all[modelId] = sanitizeLayout(layout);
+    storage.setItem(LAYOUT_KEY, JSON.stringify(all));
+  } catch {
+    // Quota errors / private mode: the layout just won't persist.
+  }
+}
+
+/** Drop saved positions for a model (reset, delete). */
+export function clearLayout(modelId: string): void {
+  const storage = layoutStorage();
+  if (!storage) return;
+  try {
+    const all = readAllLayouts(storage);
+    if (!(modelId in all)) return;
+    delete all[modelId];
+    storage.setItem(LAYOUT_KEY, JSON.stringify(all));
+  } catch {
+    // Ignore: the layout simply stays as-is.
+  }
+}

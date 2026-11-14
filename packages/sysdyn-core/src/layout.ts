@@ -77,15 +77,26 @@ export function autoLayout(model: ModelDef): DiagramLayout {
   }
   rows.push(...auxLayers.filter(row => row.names.length));
 
+  // Wide rows (many parameters) wrap into multiple centered rows so the
+  // canvas stays readable instead of stretching into a panorama.
+  const MAX_ROW_W = 1400;
+  const maxPerRow = Math.max(1, Math.floor((MAX_ROW_W + COL_GAP) / (NODE_W + COL_GAP)));
+  const wrappedRows: typeof rows = [];
+  for (const row of rows) {
+    for (let start = 0; start < row.names.length; start += maxPerRow) {
+      wrappedRows.push({ type: row.type, names: row.names.slice(start, start + maxPerRow) });
+    }
+  }
+
   const rowWidth = (count: number) => (count ? count * NODE_W + (count - 1) * COL_GAP : 0);
   const stockRowWidth = stocks.length
     ? stocks.length * STOCK_W + (stocks.length - 1) * (STOCK_PITCH - STOCK_W)
     : 0;
-  const widestRow = rows.reduce((max, row) => Math.max(max, rowWidth(row.names.length)), 0);
+  const widestRow = wrappedRows.reduce((max, row) => Math.max(max, rowWidth(row.names.length)), 0);
   const width = Math.max(900, stockRowWidth + 2 * MARGIN, widestRow + 2 * MARGIN);
 
   // --- vertical bands -----------------------------------------------------
-  const cloudInY = MARGIN + rows.length * ROW_PITCH;
+  const cloudInY = MARGIN + wrappedRows.length * ROW_PITCH;
   const flowInY = cloudInY + CLOUD_H + 36;
   const stockY = flowInY + FLOW_H + 62;
   const flowOutY = stockY + STOCK_H + 62;
@@ -93,7 +104,7 @@ export function autoLayout(model: ModelDef): DiagramLayout {
   const height = cloudOutY + CLOUD_H + MARGIN;
 
   // --- parameter / auxiliary rows ----------------------------------------
-  rows.forEach((row, index) => {
+  wrappedRows.forEach((row, index) => {
     const total = rowWidth(row.names.length);
     const startX = Math.max(MARGIN, (width - total) / 2);
     row.names.forEach((name, column) => {
