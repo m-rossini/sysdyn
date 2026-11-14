@@ -115,7 +115,7 @@ describe('hp-teams model', () => {
     const baseline = simulate(loadModel());
 
     const moreIncoming = loadModel();
-    moreIncoming.model.parameters!.find(p => p.name === 'incoming_rate')!.value = 5;
+    moreIncoming.model.parameters!.find(p => p.name === 'incoming_rate')!.value = 10;
     const moreIncomingResult = simulate(moreIncoming);
 
     const moreCapacity = loadModel();

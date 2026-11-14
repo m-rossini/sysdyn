@@ -1,7 +1,7 @@
 version: "1"
 model:
   id: hp-teams
-  title: High-Performance Team (v0)
+  title: High-Performance Team (v1)
   description: >-
     Simple model of throughput, capability and energy. A starting point to iterate on.
     Throughput converts backlog into delivered work. Delivered work grows capability
@@ -16,29 +16,30 @@ model:
       value: 30
       unit: work/week
       description: >-
-        Throughput ceiling at full capability and full energy. Set high enough that
-        initial throughput (about 4.8 work/week) exceeds the incoming rate, so the
-        backlog drains instead of growing without bound.
+        Throughput ceiling at full capability and full energy. Initial throughput
+        (about 5.8 work/week) starts below the incoming rate, so the backlog grows
+        until capability and energy gains lift throughput above arrivals.
       concept: parameter
     - name: incoming_rate
-      value: 4
+      value: 8
       unit: work/week
       description: New work arriving per week.
       concept: parameter
     - name: learning_rate
-      value: 0.08
+      value: 0.25
       unit: 1/week
       description: Fraction of throughput converted into capability gains.
       concept: parameter
     - name: burnout_rate
-      value: 0.2
+      value: 0.25
       unit: points/work
       description: >-
         Energy consumed per unit of throughput. Chosen together with recovery_rate so
-        energy settles near 75-85 rather than collapsing or saturating at 100.
+        energy settles near 45-55 under sustained load rather than collapsing or
+        saturating at 100.
       concept: parameter
     - name: recovery_rate
-      value: 0.05
+      value: 0.04
       unit: 1/week
       description: Rate at which the energy gap (100 - energy) is restored.
       concept: parameter
@@ -81,7 +82,7 @@ model:
       description: Share of capacity available at the current energy level.
       concept: auxiliary
     - name: focus
-      equation: "backlog / (backlog + 40)"
+      equation: "backlog / (backlog + 20)"
       unit: "1"
       description: >-
         Share of nominal capacity that has work to act on. It approaches 1 for a large
