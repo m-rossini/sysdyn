@@ -1,12 +1,12 @@
 version: "1"
 model:
   id: hp-teams
-  title: High-Performance Team (v2)
+  title: High-Performance Team (v3)
   description: >-
-    Delivery system with a WIP buffer between backlog and delivered work.
-    Pulling too much work into progress congests the team and slows delivery,
-    while capability growth (reinforcing loop) and energy drain (balancing loop)
-    play out as in v1.
+    Delivery system with a WIP buffer, formal learning investment, and
+    technical debt. Pressure breeds shortcuts, shortcuts accrue debt, debt
+    consumes capacity as rework — the failure mode of a "high-performing"
+    team.
   time:
     start: 0
     stop: 52
@@ -71,6 +71,21 @@ model:
         How well learning investment converts into capability (quality of
         trainings, books, labs). Scales the training flow.
       concept: parameter
+    - name: debt_rate
+      value: 0.22
+      unit: points/work
+      description: Debt points accrued per unit of finished work under pressure.
+      concept: parameter
+    - name: paydown_rate
+      value: 0.15
+      unit: 1/week
+      description: Rate at which debt is paid down when pressure is low.
+      concept: parameter
+    - name: pressure_horizon
+      value: 12
+      unit: week
+      description: Weeks of queued work the team absorbs before feeling pressure.
+      concept: parameter
   stocks:
     - name: backlog
       initial: 80
@@ -107,6 +122,15 @@ model:
       outflows: [burnout]
       description: Team energy and morale, on a 0-100 scale.
       concept: stock
+    - name: tech_debt
+      initial: 10
+      unit: points
+      inflows: [debt_accrual]
+      outflows: [debt_paydown]
+      description: >-
+        Accumulated shortcuts and unfinished quality work. Consumes capacity
+        as rework; paid down when pressure is low.
+      concept: stock
   auxiliaries:
     - name: capacity
       equation: "base_capacity * capability / 100 * (1 - training_share)"
@@ -133,9 +157,21 @@ model:
         gently above it. Models context-switching and queueing overhead.
       concept: auxiliary
     - name: effective_throughput
-      equation: "capacity * energy_factor * focus * congestion"
+      equation: "capacity * energy_factor * focus * congestion * (1 - rework_share)"
       unit: work/week
-      description: Actual delivery rate after energy, work-in-hand and congestion limits.
+      description: Actual delivery rate after energy, work-in-hand, congestion and rework limits.
+      concept: auxiliary
+    - name: schedule_pressure
+      equation: "(backlog + in_progress) / (max(finish_work, 0.5) * pressure_horizon)"
+      unit: "1"
+      description: >-
+        Queued work in weeks of current finishing rate, over the absorbed
+        horizon. Above 1 the team feels pressure and takes shortcuts.
+      concept: auxiliary
+    - name: rework_share
+      equation: "tech_debt / (tech_debt + 60)"
+      unit: "1"
+      description: Share of effective capacity consumed reworking past shortcuts.
       concept: auxiliary
   flows:
     # Pull loop: backlog -> in_progress -> delivered. Starting more than the
@@ -167,6 +203,20 @@ model:
       to: capability
       unit: points/week
       description: Capability gained from formal learning investment, saturating at 100.
+      concept: flow
+    # Debt loop: pressure breeds shortcuts, shortcuts accrue debt, debt
+    # consumes capacity as rework, less capacity raises pressure.
+    - name: debt_accrual
+      equation: "debt_rate * finish_work * schedule_pressure / (schedule_pressure + 2)"
+      to: tech_debt
+      unit: points/week
+      description: Shortcuts accrued doing work under schedule pressure.
+      concept: flow
+    - name: debt_paydown
+      equation: "paydown_rate * tech_debt * 2 / (schedule_pressure + 2)"
+      from: tech_debt
+      unit: points/week
+      description: Debt retired when pressure is low enough to invest in quality.
       concept: flow
     # Balancing loop: more finishing -> more burnout -> less energy -> lower
     # energy factor -> less effective throughput.

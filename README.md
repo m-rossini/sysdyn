@@ -13,7 +13,7 @@ A generic, configurable system dynamics engine plus a web app for presenting and
 | Model | File | What it shows |
 | --- | --- | --- |
 | Inventory with Reorder Pulse (`inventory`) | `models/inventory.yaml` | Stock/flow with a periodic `pulse` replenishment and a `step` demand increase. |
-| High-Performance Team (`hp-teams`) | `models/hp-teams.yaml` | Five stocks (backlog, in-progress WIP, delivered, capability, energy): pull/congestion loop plus formal training investment with an interior optimum. See `ROADMAP.md` for the v1–v4 ladder. |
+| High-Performance Team (`hp-teams`) | `models/hp-teams.yaml` | Six stocks (backlog, WIP, delivered, capability, energy, tech debt): pull/congestion loop, training investment, and a pressure→shortcuts→rework debt loop. See `ROADMAP.md` for the v1–v4 ladder. |
 
 ## Web app
 

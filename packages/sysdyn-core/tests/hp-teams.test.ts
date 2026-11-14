@@ -62,12 +62,12 @@ describe('hp-teams model', () => {
     }
   });
 
-  it('has the expected v2 structure and all three feedback loops', () => {
+  it('has the expected v3 structure and all four feedback loops', () => {
     const config = loadModel();
-    expect(config.model.stocks).toHaveLength(5);
-    expect(config.model.flows).toHaveLength(7);
-    expect(config.model.auxiliaries).toHaveLength(5);
-    expect(config.model.parameters).toHaveLength(9);
+    expect(config.model.stocks).toHaveLength(6);
+    expect(config.model.flows).toHaveLength(9);
+    expect(config.model.auxiliaries).toHaveLength(7);
+    expect(config.model.parameters).toHaveLength(12);
 
     // Pull loop: start_work fills in_progress, finish_work drains it.
     expect(stock(config, 'in_progress').inflows).toContain('start_work');
@@ -80,6 +80,19 @@ describe('hp-teams model', () => {
     // Congestion loop: excess WIP slows finishing.
     expect(dependenciesOf(config, 'congestion')).toContain('in_progress');
     expect(dependenciesOf(config, 'effective_throughput')).toContain('congestion');
+
+    // Debt loop:
+    // pressure -> debt_accrual -> tech_debt -> rework_share ->
+    // effective_throughput -> finish_work -> (queue) -> pressure
+    expect(stock(config, 'tech_debt').inflows).toContain('debt_accrual');
+    expect(stock(config, 'tech_debt').outflows).toContain('debt_paydown');
+    expect(dependenciesOf(config, 'debt_accrual')).toContain('finish_work');
+    expect(dependenciesOf(config, 'debt_accrual')).toContain('schedule_pressure');
+    expect(dependenciesOf(config, 'schedule_pressure')).toContain('backlog');
+    expect(dependenciesOf(config, 'schedule_pressure')).toContain('finish_work');
+    expect(dependenciesOf(config, 'rework_share')).toContain('tech_debt');
+    expect(dependenciesOf(config, 'effective_throughput')).toContain('rework_share');
+    expect(dependenciesOf(config, 'debt_paydown')).toContain('tech_debt');
 
     // Reinforcing loop:
     // finish_work -> learning -> capability -> capacity -> effective_throughput -> finish_work
@@ -124,18 +137,25 @@ describe('hp-teams model', () => {
     // Finishing ramps up as the pipeline fills and capability grows.
     expect(last.finish_work).toBeGreaterThan(first.finish_work);
 
-    // Backlog and WIP never cross zero, energy stays on its 0-100 scale,
-    // and congestion stays a valid (0, 1] penalty.
+    // Backlog, WIP and debt never cross zero, energy stays on its 0-100
+    // scale, and congestion/rework stay valid (0, 1] penalties.
     let minCongestion = Infinity;
     for (const point of result.series) {
       expect(point.values.backlog).toBeGreaterThanOrEqual(-1e-9);
       expect(point.values.in_progress).toBeGreaterThanOrEqual(-1e-9);
+      expect(point.values.tech_debt).toBeGreaterThanOrEqual(-1e-9);
       expect(point.values.energy).toBeGreaterThanOrEqual(0);
       expect(point.values.energy).toBeLessThanOrEqual(100);
       expect(point.values.congestion).toBeGreaterThan(0);
       expect(point.values.congestion).toBeLessThanOrEqual(1);
+      expect(point.values.rework_share).toBeGreaterThanOrEqual(0);
+      expect(point.values.rework_share).toBeLessThan(1);
       minCongestion = Math.min(minCongestion, point.values.congestion);
     }
+
+    // Debt stays managed (no runaway) while remaining visible.
+    expect(last.tech_debt).toBeLessThan(60);
+    expect(last.rework_share).toBeLessThan(0.5);
 
     // The congestion mechanism engages (WIP pushes past the limit mid-run)
     // and WIP settles near the limit, inside the throttle band.
@@ -173,11 +193,15 @@ describe('hp-teams model', () => {
     const baseEnd = finalValues(baseline);
     const surgeEnd = finalValues(surgeResult);
 
-    // More arrivals pile into WIP, congestion deepens, finishing degrades.
+    // More arrivals pile into WIP, congestion deepens, finishing degrades,
+    // and the debt loop spins up: higher pressure accrues more debt, which
+    // consumes capacity as rework.
     expect(surgeEnd.in_progress).toBeGreaterThan(baseEnd.in_progress);
     expect(surgeEnd.congestion).toBeLessThan(baseEnd.congestion);
     expect(surgeEnd.finish_work).toBeLessThan(baseEnd.finish_work);
     expect(surgeEnd.backlog).toBeGreaterThan(baseEnd.backlog);
+    expect(surgeEnd.tech_debt).toBeGreaterThan(baseEnd.tech_debt);
+    expect(surgeEnd.rework_share).toBeGreaterThan(baseEnd.rework_share);
   });
 
   it('responds to incoming_rate and base_capacity as expected', () => {
