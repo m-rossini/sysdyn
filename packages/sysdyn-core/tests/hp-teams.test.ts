@@ -62,26 +62,42 @@ describe('hp-teams model', () => {
     }
   });
 
-  it('has the expected v0 structure and both feedback loops', () => {
+  it('has the expected v2 structure and all three feedback loops', () => {
     const config = loadModel();
-    expect(config.model.stocks).toHaveLength(4);
-    expect(config.model.flows).toHaveLength(5);
-    expect(config.model.auxiliaries).toHaveLength(4);
-    expect(config.model.parameters).toHaveLength(5);
+    expect(config.model.stocks).toHaveLength(5);
+    expect(config.model.flows).toHaveLength(7);
+    expect(config.model.auxiliaries).toHaveLength(5);
+    expect(config.model.parameters).toHaveLength(9);
+
+    // Pull loop: start_work fills in_progress, finish_work drains it.
+    expect(stock(config, 'in_progress').inflows).toContain('start_work');
+    expect(stock(config, 'in_progress').outflows).toContain('finish_work');
+    expect(stock(config, 'backlog').outflows).toContain('start_work');
+    expect(dependenciesOf(config, 'start_work')).toContain('backlog');
+    expect(dependenciesOf(config, 'start_work')).toContain('in_progress');
+    expect(dependenciesOf(config, 'finish_work')).toContain('effective_throughput');
+
+    // Congestion loop: excess WIP slows finishing.
+    expect(dependenciesOf(config, 'congestion')).toContain('in_progress');
+    expect(dependenciesOf(config, 'effective_throughput')).toContain('congestion');
 
     // Reinforcing loop:
-    // throughput -> learning -> capability -> capacity -> effective_throughput -> throughput
+    // finish_work -> learning -> capability -> capacity -> effective_throughput -> finish_work
     expect(stock(config, 'capability').inflows).toContain('learning');
-    expect(dependenciesOf(config, 'learning')).toContain('throughput');
+    expect(stock(config, 'capability').inflows).toContain('training');
+    expect(dependenciesOf(config, 'learning')).toContain('finish_work');
     expect(dependenciesOf(config, 'learning')).toContain('capability');
+    expect(dependenciesOf(config, 'training')).toContain('training_share');
+    expect(dependenciesOf(config, 'training')).toContain('training_effectiveness');
+    expect(dependenciesOf(config, 'capacity')).toContain('training_share');
     expect(dependenciesOf(config, 'capacity')).toContain('capability');
     expect(dependenciesOf(config, 'effective_throughput')).toContain('capacity');
-    expect(dependenciesOf(config, 'throughput')).toContain('effective_throughput');
+    expect(dependenciesOf(config, 'finish_work')).toContain('effective_throughput');
 
     // Balancing loop:
-    // throughput -> burnout -> energy -> energy_factor -> effective_throughput
+    // finish_work -> burnout -> energy -> energy_factor -> effective_throughput
     expect(stock(config, 'energy').outflows).toContain('burnout');
-    expect(dependenciesOf(config, 'burnout')).toContain('throughput');
+    expect(dependenciesOf(config, 'burnout')).toContain('finish_work');
     expect(dependenciesOf(config, 'energy_factor')).toContain('energy');
     expect(dependenciesOf(config, 'effective_throughput')).toContain('energy_factor');
   });
@@ -92,23 +108,76 @@ describe('hp-teams model', () => {
     const first = result.series[0].values;
     const last = finalValues(result);
 
-    // Delivered work grows strictly at every recorded point.
+    // Delivered work never decreases (flat while the empty pipeline fills),
+    // and grows net across the horizon.
     for (let i = 1; i < result.series.length; i++) {
-      expect(result.series[i].values.delivered).toBeGreaterThan(
+      expect(result.series[i].values.delivered).toBeGreaterThanOrEqual(
         result.series[i - 1].values.delivered,
       );
     }
+    expect(last.delivered).toBeGreaterThan(first.delivered);
 
-    // Capability improves and backlog drains.
+    // Capability improves and the WIP buffer fills.
     expect(last.capability).toBeGreaterThan(first.capability);
-    expect(last.backlog).toBeLessThan(first.backlog);
+    expect(last.in_progress).toBeGreaterThan(first.in_progress);
 
-    // Backlog never crosses zero and energy stays on its 0-100 scale.
+    // Finishing ramps up as the pipeline fills and capability grows.
+    expect(last.finish_work).toBeGreaterThan(first.finish_work);
+
+    // Backlog and WIP never cross zero, energy stays on its 0-100 scale,
+    // and congestion stays a valid (0, 1] penalty.
+    let minCongestion = Infinity;
     for (const point of result.series) {
       expect(point.values.backlog).toBeGreaterThanOrEqual(-1e-9);
+      expect(point.values.in_progress).toBeGreaterThanOrEqual(-1e-9);
       expect(point.values.energy).toBeGreaterThanOrEqual(0);
       expect(point.values.energy).toBeLessThanOrEqual(100);
+      expect(point.values.congestion).toBeGreaterThan(0);
+      expect(point.values.congestion).toBeLessThanOrEqual(1);
+      minCongestion = Math.min(minCongestion, point.values.congestion);
     }
+
+    // The congestion mechanism engages (WIP pushes past the limit mid-run)
+    // and WIP settles near the limit, inside the throttle band.
+    expect(minCongestion).toBeLessThan(1);
+    expect(last.in_progress).toBeGreaterThan(15);
+    expect(last.in_progress).toBeLessThan(25);
+  });
+
+  it('rewards moderate training but punishes over-investment', () => {
+    const baseline = simulate(loadModel());
+
+    const none = loadModel();
+    none.model.parameters!.find(p => p.name === 'training_share')!.value = 0;
+    const noneResult = simulate(none);
+
+    const heavy = loadModel();
+    heavy.model.parameters!.find(p => p.name === 'training_share')!.value = 0.3;
+    const heavyResult = simulate(heavy);
+
+    // 10% training time beats both 0% and 30% on cumulative delivery:
+    // the optimum is interior (slow down to speed up, but not too much).
+    expect(finalValues(baseline).delivered).toBeGreaterThan(finalValues(noneResult).delivered);
+    expect(finalValues(baseline).delivered).toBeGreaterThan(finalValues(heavyResult).delivered);
+    // ...and on end capability versus no training.
+    expect(finalValues(baseline).capability).toBeGreaterThan(finalValues(noneResult).capability);
+  });
+
+  it('punishes overload: surging arrivals slow finishing', () => {
+    const baseline = simulate(loadModel());
+
+    const surge = loadModel();
+    surge.model.parameters!.find(p => p.name === 'incoming_rate')!.value = 14;
+    const surgeResult = simulate(surge);
+
+    const baseEnd = finalValues(baseline);
+    const surgeEnd = finalValues(surgeResult);
+
+    // More arrivals pile into WIP, congestion deepens, finishing degrades.
+    expect(surgeEnd.in_progress).toBeGreaterThan(baseEnd.in_progress);
+    expect(surgeEnd.congestion).toBeLessThan(baseEnd.congestion);
+    expect(surgeEnd.finish_work).toBeLessThan(baseEnd.finish_work);
+    expect(surgeEnd.backlog).toBeGreaterThan(baseEnd.backlog);
   });
 
   it('responds to incoming_rate and base_capacity as expected', () => {

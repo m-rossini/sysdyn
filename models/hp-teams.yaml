@@ -1,11 +1,12 @@
 version: "1"
 model:
   id: hp-teams
-  title: High-Performance Team (v1)
+  title: High-Performance Team (v2)
   description: >-
-    Simple model of throughput, capability and energy. A starting point to iterate on.
-    Throughput converts backlog into delivered work. Delivered work grows capability
-    (reinforcing loop) while also consuming energy (balancing loop).
+    Delivery system with a WIP buffer between backlog and delivered work.
+    Pulling too much work into progress congests the team and slows delivery,
+    while capability growth (reinforcing loop) and energy drain (balancing loop)
+    play out as in v1.
   time:
     start: 0
     stop: 52
@@ -16,9 +17,8 @@ model:
       value: 30
       unit: work/week
       description: >-
-        Throughput ceiling at full capability and full energy. Initial throughput
-        (about 5.8 work/week) starts below the incoming rate, so the backlog grows
-        until capability and energy gains lift throughput above arrivals.
+        Throughput ceiling at full capability and full energy. Delivery ramps up as
+        the WIP buffer fills, then capability and energy gains lift it further.
       concept: parameter
     - name: incoming_rate
       value: 8
@@ -28,7 +28,7 @@ model:
     - name: learning_rate
       value: 0.25
       unit: 1/week
-      description: Fraction of throughput converted into capability gains.
+      description: Fraction of finished work converted into capability gains.
       concept: parameter
     - name: burnout_rate
       value: 0.25
@@ -43,24 +43,61 @@ model:
       unit: 1/week
       description: Rate at which the energy gap (100 - energy) is restored.
       concept: parameter
+    - name: wip_limit
+      value: 20
+      unit: work
+      description: >-
+        Work-in-progress level the team sustains without congestion. Starting more
+        than this slows finishing via the congestion auxiliary.
+      concept: parameter
+    - name: pull_rate
+      value: 0.2
+      unit: 1/week
+      description: >-
+        Aggressiveness of pulling backlog into progress. Throttled to zero as
+        in-progress work approaches 1.6x the WIP limit.
+      concept: parameter
+    - name: training_share
+      value: 0.1
+      unit: "1"
+      description: >-
+        Share of team time invested in formal learning (trainings, conferences,
+        books, labs). Diverted from delivery: it lowers current capacity.
+      concept: parameter
+    - name: training_effectiveness
+      value: 0.5
+      unit: "1"
+      description: >-
+        How well learning investment converts into capability (quality of
+        trainings, books, labs). Scales the training flow.
+      concept: parameter
   stocks:
     - name: backlog
       initial: 80
       unit: work
       inflows: [new_work]
-      outflows: [throughput]
-      description: Work waiting to be delivered.
+      outflows: [start_work]
+      description: Work waiting to be started.
+      concept: stock
+    - name: in_progress
+      initial: 0
+      unit: work
+      inflows: [start_work]
+      outflows: [finish_work]
+      description: >-
+        Work started but not yet delivered. The WIP buffer decouples arrivals
+        from delivery; too much of it congests the team.
       concept: stock
     - name: delivered
       initial: 0
       unit: work
-      inflows: [throughput]
+      inflows: [finish_work]
       description: Cumulative work delivered.
       concept: stock
     - name: capability
       initial: 40
       unit: points
-      inflows: [learning]
+      inflows: [learning, training]
       description: Team skill and knowledge, on a 0-100 scale.
       concept: stock
     - name: energy
@@ -72,9 +109,9 @@ model:
       concept: stock
   auxiliaries:
     - name: capacity
-      equation: "base_capacity * capability / 100"
+      equation: "base_capacity * capability / 100 * (1 - training_share)"
       unit: work/week
-      description: Throughput ceiling implied by current capability.
+      description: Throughput ceiling implied by current capability, net of time invested in training.
       concept: auxiliary
     - name: energy_factor
       equation: "energy / 100"
@@ -82,40 +119,59 @@ model:
       description: Share of capacity available at the current energy level.
       concept: auxiliary
     - name: focus
-      equation: "backlog / (backlog + 20)"
+      equation: "in_progress / (in_progress + 10)"
       unit: "1"
       description: >-
-        Share of nominal capacity that has work to act on. It approaches 1 for a large
-        backlog and goes to 0 when the backlog empties. The original draft used
-        1 / (1 + backlog / 100), which made throughput shrink as the backlog grew and
-        drove backlog to zero (and negative under Euler); this saturating form keeps
-        the drainage smooth and bounded.
+        Share of nominal capacity that has work in hand to act on. It approaches 1
+        once the WIP buffer is filled and goes to 0 when no work is in progress.
+      concept: auxiliary
+    - name: congestion
+      equation: "wip_limit / (wip_limit + max(0, in_progress - wip_limit) / 2)"
+      unit: "1"
+      description: >-
+        Delivery penalty from excess WIP: 1 at or below the WIP limit, decaying
+        gently above it. Models context-switching and queueing overhead.
       concept: auxiliary
     - name: effective_throughput
-      equation: "capacity * energy_factor * focus"
+      equation: "capacity * energy_factor * focus * congestion"
       unit: work/week
-      description: Actual delivery rate after energy and work-availability limits.
+      description: Actual delivery rate after energy, work-in-hand and congestion limits.
       concept: auxiliary
   flows:
-    # Reinforcing loop: more throughput -> more learning -> more capability ->
-    # more capacity -> more effective throughput.
-    - name: throughput
-      equation: "effective_throughput"
+    # Pull loop: backlog -> in_progress -> delivered. Starting more than the
+    # WIP limit congests finishing, so excess starts slow completions.
+    - name: start_work
+      equation: "pull_rate * backlog * max(0, 1 - in_progress / (wip_limit * 1.6))"
       from: backlog
+      to: in_progress
+      unit: work/week
+      description: Work pulled from backlog into progress, throttled near 1.6x the WIP limit.
+      concept: flow
+    # Reinforcing loop: more finishing -> more learning -> more capability ->
+    # more capacity -> more effective throughput.
+    - name: finish_work
+      equation: "effective_throughput"
+      from: in_progress
       to: delivered
       unit: work/week
-      description: Work completed and moved from backlog to delivered.
+      description: Work completed and moved from in-progress to delivered.
       concept: flow
     - name: learning
-      equation: "learning_rate * throughput * (1 - capability / 100)"
+      equation: "learning_rate * finish_work * (1 - capability / 100)"
       to: capability
       unit: points/week
       description: Capability gained from doing work, saturating at 100.
       concept: flow
-    # Balancing loop: more throughput -> more burnout -> less energy -> lower
+    - name: training
+      equation: "training_effectiveness * training_share * base_capacity * (1 - capability / 100)"
+      to: capability
+      unit: points/week
+      description: Capability gained from formal learning investment, saturating at 100.
+      concept: flow
+    # Balancing loop: more finishing -> more burnout -> less energy -> lower
     # energy factor -> less effective throughput.
     - name: burnout
-      equation: "burnout_rate * throughput"
+      equation: "burnout_rate * finish_work"
       from: energy
       unit: points/week
       description: Energy spent sustaining the delivery rate.
