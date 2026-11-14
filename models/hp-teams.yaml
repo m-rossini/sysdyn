@@ -1,12 +1,13 @@
 version: "1"
 model:
   id: hp-teams
-  title: High-Performance Team (v3)
+  title: High-Performance Team (v4)
   description: >-
-    Delivery system with a WIP buffer, formal learning investment, and
-    technical debt. Pressure breeds shortcuts, shortcuts accrue debt, debt
-    consumes capacity as rework — the failure mode of a "high-performing"
-    team.
+    The people layer on top of the v3 delivery system: staff with hiring and
+    attrition (capability is a per-person average, newcomers ramp up slowly
+    and need mentoring — the J-curve), leadership trust (slow to build, fast
+    to collapse; gates training and taxes autonomy), and team cohesion
+    (handoff loss, mentoring quality, onboarding speed).
   time:
     start: 0
     stop: 52
@@ -86,6 +87,56 @@ model:
       unit: week
       description: Weeks of queued work the team absorbs before feeling pressure.
       concept: parameter
+    - name: staff_target
+      value: 5
+      unit: people
+      description: Headcount the team hires toward. Raise it to grow the team.
+      concept: parameter
+    - name: hire_delay
+      value: 4
+      unit: week
+      description: Weeks to close the gap between target and actual headcount.
+      concept: parameter
+    - name: attrition_rate
+      value: 0.01
+      unit: 1/week
+      description: Base weekly fraction of staff leaving; doubled when energy is drained.
+      concept: parameter
+    - name: ramp_time
+      value: 6
+      unit: week
+      description: Weeks for a new hire to become fully effective.
+      concept: parameter
+    - name: mentor_fraction
+      value: 0.5
+      unit: "1"
+      description: Share of a newcomer's gap that seniors pay as mentoring load.
+      concept: parameter
+    - name: trust_build_rate
+      value: 0.8
+      unit: points/week
+      description: Max weekly trust gain when delivery meets promises. Slow by design.
+      concept: parameter
+    - name: trust_erosion_rate
+      value: 2.5
+      unit: points/week
+      description: Max weekly trust loss on misses; faster than building, but slow enough to forgive transients.
+      concept: parameter
+    - name: cohesion_build_rate
+      value: 1.5
+      unit: points/week
+      description: Max weekly cohesion gain from delivering together.
+      concept: parameter
+    - name: cohesion_churn_rate
+      value: 10
+      unit: points
+      description: Cohesion cost per full team turnover equivalent.
+      concept: parameter
+    - name: conflict_rate
+      value: 0.5
+      unit: points/week
+      description: Weekly cohesion loss per unit of schedule pressure above 1.
+      concept: parameter
   stocks:
     - name: backlog
       initial: 80
@@ -109,11 +160,13 @@ model:
       inflows: [finish_work]
       description: Cumulative work delivered.
       concept: stock
-    - name: capability
-      initial: 40
+    - name: capability_total
+      initial: 200
       unit: points
       inflows: [learning, training]
-      description: Team skill and knowledge, on a 0-100 scale.
+      description: >-
+        Total team skill and knowledge. Per-person capability is
+        capability_total / staff, so hiring dilutes the average.
       concept: stock
     - name: energy
       initial: 60
@@ -131,11 +184,68 @@ model:
         Accumulated shortcuts and unfinished quality work. Consumes capacity
         as rework; paid down when pressure is low.
       concept: stock
+    - name: staff
+      initial: 5
+      unit: people
+      inflows: [hiring]
+      outflows: [attrition]
+      description: Team headcount. Hires toward staff_target; leaves faster when energy is drained.
+      concept: stock
+    - name: trust
+      initial: 60
+      unit: points
+      inflows: [trust_gain]
+      outflows: [trust_loss]
+      description: >-
+        Leadership confidence, 0-100. Builds slowly on kept promises, collapses
+        fast on misses and visible burnout. Gates training time and autonomy.
+      concept: stock
+    - name: cohesion
+      initial: 60
+      unit: points
+      inflows: [cohesion_gain]
+      outflows: [cohesion_loss]
+      description: >-
+        Social capital, 0-100. Built by delivering together; burned by churn
+        and conflict under pressure. Carries mentoring and handoff quality.
+      concept: stock
   auxiliaries:
     - name: capacity
-      equation: "base_capacity * capability / 100 * (1 - training_share)"
+      equation: "base_capacity * capability / 100 * (1 - training_share_eff) * effective_staff / max(staff, 0.5) * autonomy_factor * (1 - mentoring_load)"
       unit: work/week
-      description: Throughput ceiling implied by current capability, net of time invested in training.
+      description: >-
+        Throughput ceiling: per-person capability times effective headcount,
+        net of training time, autonomy tax and mentoring load.
+      concept: auxiliary
+    - name: capability
+      equation: "capability_total / max(staff, 0.5)"
+      unit: points
+      description: Average per-person capability. Diluted by hiring, grown by learning.
+      concept: auxiliary
+    - name: promised_rate
+      equation: "incoming_rate"
+      unit: work/week
+      description: "Delivery rate leadership expects: keeping up with arrivals."
+      concept: auxiliary
+    - name: effective_staff
+      equation: "smooth(staff, ramp_time, 5)"
+      unit: people
+      description: Fully-effective headcount; lags hires by the ramp time.
+      concept: auxiliary
+    - name: autonomy_factor
+      equation: "1 - 0.15 * max(0, 60 - trust) / 60"
+      unit: "1"
+      description: Capacity tax from low-trust overhead (reports, approvals).
+      concept: auxiliary
+    - name: training_share_eff
+      equation: "training_share * trust / 60"
+      unit: "1"
+      description: "Effective training time: low trust squeezes learning out."
+      concept: auxiliary
+    - name: mentoring_load
+      equation: "mentor_fraction * max(0, staff - effective_staff) / max(staff, 0.5)"
+      unit: "1"
+      description: Share of senior capacity spent bringing newcomers up to speed.
       concept: auxiliary
     - name: energy_factor
       equation: "energy / 100"
@@ -169,9 +279,9 @@ model:
         horizon. Above 1 the team feels pressure and takes shortcuts.
       concept: auxiliary
     - name: rework_share
-      equation: "tech_debt / (tech_debt + 60)"
+      equation: "tech_debt / (tech_debt + 60) * (1 + 0.5 * (60 - cohesion) / 100)"
       unit: "1"
-      description: Share of effective capacity consumed reworking past shortcuts.
+      description: Share of effective capacity consumed reworking past shortcuts; worse when cohesion is low.
       concept: auxiliary
   flows:
     # Pull loop: backlog -> in_progress -> delivered. Starting more than the
@@ -193,16 +303,52 @@ model:
       description: Work completed and moved from in-progress to delivered.
       concept: flow
     - name: learning
-      equation: "learning_rate * finish_work * (1 - capability / 100)"
-      to: capability
+      equation: "learning_rate * finish_work * (1 - capability / 100) * staff"
+      to: capability_total
       unit: points/week
-      description: Capability gained from doing work, saturating at 100.
+      description: Team learning-by-doing; scales with headcount, saturating per-person at 100.
       concept: flow
     - name: training
-      equation: "training_effectiveness * training_share * base_capacity * (1 - capability / 100)"
-      to: capability
+      equation: "training_effectiveness * training_share_eff * base_capacity * (1 - capability / 100) * (1 + 0.5 * (cohesion - 60) / 100) * staff"
+      to: capability_total
       unit: points/week
-      description: Capability gained from formal learning investment, saturating at 100.
+      description: Team formal learning; scales with headcount. Needs trust (time) and cohesion (mentoring quality).
+      concept: flow
+    - name: hiring
+      equation: "max(0, staff_target - staff) / hire_delay"
+      to: staff
+      unit: people/week
+      description: Hires toward the headcount target.
+      concept: flow
+    - name: attrition
+      equation: "staff * attrition_rate * (1 + max(0, 60 - energy) / 30)"
+      from: staff
+      unit: people/week
+      description: People leaving; faster when energy is drained.
+      concept: flow
+    - name: trust_gain
+      equation: "trust_build_rate * min(1, finish_work / max(promised_rate, 0.5)) * max(0, 1 - trust / 100)"
+      to: trust
+      unit: points/week
+      description: Slow trust buildup on kept promises, saturating at 100.
+      concept: flow
+    - name: trust_loss
+      equation: "(trust_erosion_rate * max(0, 1 - finish_work / max(promised_rate, 0.5)) + trust_erosion_rate * 0.5 * max(0, 60 - energy) / 60) * trust / 100"
+      from: trust
+      unit: points/week
+      description: Fast trust collapse on misses and visible burnout; proportional, so trust floors at zero.
+      concept: flow
+    - name: cohesion_gain
+      equation: "cohesion_build_rate * min(1, finish_work / max(promised_rate, 0.5)) * max(0, 1 - cohesion / 100)"
+      to: cohesion
+      unit: points/week
+      description: Slow cohesion buildup from delivering together.
+      concept: flow
+    - name: cohesion_loss
+      equation: "(cohesion_churn_rate * (hiring + attrition) / max(staff, 0.5) + conflict_rate * max(0, schedule_pressure - 1)) * cohesion / 100"
+      from: cohesion
+      unit: points/week
+      description: Cohesion burned by churn and conflict under pressure; proportional, so cohesion floors at zero.
       concept: flow
     # Debt loop: pressure breeds shortcuts, shortcuts accrue debt, debt
     # consumes capacity as rework, less capacity raises pressure.

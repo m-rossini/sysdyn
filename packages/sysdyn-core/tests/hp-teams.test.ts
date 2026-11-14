@@ -62,12 +62,12 @@ describe('hp-teams model', () => {
     }
   });
 
-  it('has the expected v3 structure and all four feedback loops', () => {
+  it('has the expected v4 structure and all seven feedback loops', () => {
     const config = loadModel();
-    expect(config.model.stocks).toHaveLength(6);
-    expect(config.model.flows).toHaveLength(9);
-    expect(config.model.auxiliaries).toHaveLength(7);
-    expect(config.model.parameters).toHaveLength(12);
+    expect(config.model.stocks).toHaveLength(9);
+    expect(config.model.flows).toHaveLength(15);
+    expect(config.model.auxiliaries).toHaveLength(13);
+    expect(config.model.parameters).toHaveLength(22);
 
     // Pull loop: start_work fills in_progress, finish_work drains it.
     expect(stock(config, 'in_progress').inflows).toContain('start_work');
@@ -94,15 +94,24 @@ describe('hp-teams model', () => {
     expect(dependenciesOf(config, 'effective_throughput')).toContain('rework_share');
     expect(dependenciesOf(config, 'debt_paydown')).toContain('tech_debt');
 
-    // Reinforcing loop:
-    // finish_work -> learning -> capability -> capacity -> effective_throughput -> finish_work
-    expect(stock(config, 'capability').inflows).toContain('learning');
-    expect(stock(config, 'capability').inflows).toContain('training');
+    // Reinforcing loop (through the team average):
+    // finish_work -> learning -> capability_total -> capability -> capacity ->
+    // effective_throughput -> finish_work
+    expect(stock(config, 'capability_total').inflows).toContain('learning');
+    expect(stock(config, 'capability_total').inflows).toContain('training');
     expect(dependenciesOf(config, 'learning')).toContain('finish_work');
     expect(dependenciesOf(config, 'learning')).toContain('capability');
-    expect(dependenciesOf(config, 'training')).toContain('training_share');
+    expect(dependenciesOf(config, 'capability')).toContain('capability_total');
+    expect(dependenciesOf(config, 'capability')).toContain('staff');
+    expect(dependenciesOf(config, 'capacity')).toContain('capability');
+    expect(dependenciesOf(config, 'capacity')).toContain('effective_staff');
+    expect(dependenciesOf(config, 'capacity')).toContain('autonomy_factor');
+    expect(dependenciesOf(config, 'capacity')).toContain('mentoring_load');
+    expect(dependenciesOf(config, 'training')).toContain('training_share_eff');
     expect(dependenciesOf(config, 'training')).toContain('training_effectiveness');
-    expect(dependenciesOf(config, 'capacity')).toContain('training_share');
+    expect(dependenciesOf(config, 'training_share_eff')).toContain('training_share');
+    expect(dependenciesOf(config, 'training_share_eff')).toContain('trust');
+    expect(dependenciesOf(config, 'capacity')).toContain('training_share_eff');
     expect(dependenciesOf(config, 'capacity')).toContain('capability');
     expect(dependenciesOf(config, 'effective_throughput')).toContain('capacity');
     expect(dependenciesOf(config, 'finish_work')).toContain('effective_throughput');
@@ -113,6 +122,35 @@ describe('hp-teams model', () => {
     expect(dependenciesOf(config, 'burnout')).toContain('finish_work');
     expect(dependenciesOf(config, 'energy_factor')).toContain('energy');
     expect(dependenciesOf(config, 'effective_throughput')).toContain('energy_factor');
+
+    // Staffing loop: hiring grows headcount, attrition drains it faster when
+    // energy is low; headcount dilutes the capability average while newcomers
+    // ramp up (effective_staff) and consume mentoring.
+    expect(stock(config, 'staff').inflows).toContain('hiring');
+    expect(stock(config, 'staff').outflows).toContain('attrition');
+    expect(dependenciesOf(config, 'hiring')).toContain('staff_target');
+    expect(dependenciesOf(config, 'attrition')).toContain('staff');
+    expect(dependenciesOf(config, 'attrition')).toContain('energy');
+    expect(dependenciesOf(config, 'effective_staff')).toContain('staff');
+    expect(dependenciesOf(config, 'mentoring_load')).toContain('effective_staff');
+
+    // Trust loop: kept promises build it slowly, misses and burnout burn it
+    // fast; trust gates training time and taxes capacity via autonomy.
+    expect(stock(config, 'trust').inflows).toContain('trust_gain');
+    expect(stock(config, 'trust').outflows).toContain('trust_loss');
+    expect(dependenciesOf(config, 'promised_rate')).toContain('incoming_rate');
+    expect(dependenciesOf(config, 'trust_gain')).toContain('promised_rate');
+    expect(dependenciesOf(config, 'trust_loss')).toContain('promised_rate');
+    expect(dependenciesOf(config, 'autonomy_factor')).toContain('trust');
+
+    // Cohesion loop: delivering together builds it; churn and pressure
+    // conflict burn it; it carries mentoring quality and handoff loss.
+    expect(stock(config, 'cohesion').inflows).toContain('cohesion_gain');
+    expect(stock(config, 'cohesion').outflows).toContain('cohesion_loss');
+    expect(dependenciesOf(config, 'cohesion_gain')).toContain('promised_rate');
+    expect(dependenciesOf(config, 'cohesion_loss')).toContain('schedule_pressure');
+    expect(dependenciesOf(config, 'training')).toContain('cohesion');
+    expect(dependenciesOf(config, 'rework_share')).toContain('cohesion');
   });
 
   it('produces sensible dynamics across the horizon', () => {
@@ -157,6 +195,17 @@ describe('hp-teams model', () => {
     expect(last.tech_debt).toBeLessThan(60);
     expect(last.rework_share).toBeLessThan(0.5);
 
+    // People stocks stay on their scales: headcount positive, trust and
+    // cohesion bounded 0-100 by construction (proportional drains).
+    expect(last.staff).toBeGreaterThan(0);
+    for (const point of result.series) {
+      expect(point.values.staff).toBeGreaterThan(0);
+      expect(point.values.trust).toBeGreaterThanOrEqual(0);
+      expect(point.values.trust).toBeLessThanOrEqual(100);
+      expect(point.values.cohesion).toBeGreaterThanOrEqual(0);
+      expect(point.values.cohesion).toBeLessThanOrEqual(100);
+    }
+
     // The congestion mechanism engages (WIP pushes past the limit mid-run)
     // and WIP settles near the limit, inside the throttle band.
     expect(minCongestion).toBeLessThan(1);
@@ -181,6 +230,28 @@ describe('hp-teams model', () => {
     expect(finalValues(baseline).delivered).toBeGreaterThan(finalValues(heavyResult).delivered);
     // ...and on end capability versus no training.
     expect(finalValues(baseline).capability).toBeGreaterThan(finalValues(noneResult).capability);
+  });
+
+  it('shows the hiring J-curve: dilution dip, then recovery', () => {
+    const baseline = simulate(loadModel());
+    const quarter = (r: SimulationResult) => r.series[Math.floor(r.series.length / 4)].values;
+    const end = (r: SimulationResult) => finalValues(r);
+
+    const growing = loadModel();
+    growing.model.parameters!.find(p => p.name === 'staff_target')!.value = 8;
+    const growingResult = simulate(growing);
+
+    // Headcount rises toward the new target.
+    expect(end(growingResult).staff).toBeGreaterThan(end(baseline).staff);
+    // Newcomers dilute the average and need mentoring: delivery dips early…
+    expect(quarter(growingResult).finish_work).toBeLessThan(quarter(baseline).finish_work);
+    expect(quarter(growingResult).capability).toBeLessThan(quarter(baseline).capability);
+    // …then recovers as hires ramp up and learn.
+    expect(end(growingResult).finish_work).toBeGreaterThan(quarter(growingResult).finish_work);
+    expect(end(growingResult).capability).toBeGreaterThan(quarter(growingResult).capability);
+    // The strain shows in the people layer: lower trust and cohesion.
+    expect(end(growingResult).trust).toBeLessThan(end(baseline).trust);
+    expect(end(growingResult).cohesion).toBeLessThan(end(baseline).cohesion);
   });
 
   it('punishes overload: surging arrivals slow finishing', () => {
