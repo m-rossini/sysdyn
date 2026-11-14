@@ -1,8 +1,11 @@
 # High-Performance Team — model roadmap
 
 The `hp-teams` model grows one version at a time. Each version lives on its
-own branch (`hp-teams-v1`, `hp-teams-v2`, …) so versions can be compared
-side by side; `main` holds the latest finished version.
+own branch (`hp-teams-v1`, `hp-teams-v2`, …) so versions can be explored
+independently; `main` holds the latest finished version. The shipped app
+additionally publishes every finished version as a frozen library copy
+(`models/hp-teams-v*.yaml`, unique ids), so the ladder is visible side by
+side without switching branches — branches remain the edit history.
 
 ## v1 — parameters that climb (`hp-teams-v1`, merged to main)
 
